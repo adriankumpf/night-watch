@@ -30,7 +30,7 @@ impl<'a> Camera<'a> {
         }
 
         let f = (diff as f64) / (image.width() * image.height()) as f64 / (255.0 * 3.0);
-        let night_vision = f < 0.001;
+        let night_vision = f < 0.005;
 
         debug!("{} – night_vision: {}", f, night_vision);
 

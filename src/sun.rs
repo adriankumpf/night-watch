@@ -1,4 +1,5 @@
-use std::{cmp, fmt};
+use std::fmt;
+use std::ops::Deref;
 
 use chrono::{offset::Utc, DateTime};
 use serde::Deserialize;
@@ -16,27 +17,30 @@ enum State {
 struct Attributes {
     pub next_rising: DateTime<Utc>,
     pub next_setting: DateTime<Utc>,
-    pub next_dawn: DateTime<Utc>,
-    pub next_dusk: DateTime<Utc>,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub enum Event {
-    Dusk {
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-    },
-    Dawn {
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-    },
+    Sunset(DateTime<Utc>),
+    Sunrise(DateTime<Utc>),
+}
+
+impl Deref for Event {
+    type Target = DateTime<Utc>;
+
+    fn deref(&self) -> &Self::Target {
+        match *self {
+            Event::Sunset(ref dt) => dt,
+            Event::Sunrise(ref dt) => dt,
+        }
+    }
 }
 
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Event::Dusk { start: _, end: _ } => write!(f, "Dusk"),
-            Event::Dawn { start: _, end: _ } => write!(f, "Dawn"),
+            Event::Sunset(_) => write!(f, "Sunset"),
+            Event::Sunrise(_) => write!(f, "Sunrise"),
         }
     }
 }
@@ -53,15 +57,9 @@ impl<'a> Sun<'a> {
     pub async fn next(&self) -> Event {
         let sun: Entity<Attributes, State> = self.home_assistant.fetch_entity("sun.sun").await;
 
-        let dawn = Event::Dawn {
-            start: sun.attributes.next_dawn,
-            end: sun.attributes.next_rising,
-        };
-        let dusk = Event::Dusk {
-            start: sun.attributes.next_dusk,
-            end: sun.attributes.next_setting,
-        };
-
-        cmp::min(dusk, dawn)
+        match sun.state {
+            State::AboveHorizon => Event::Sunset(sun.attributes.next_setting),
+            State::BelowHorizon => Event::Sunrise(sun.attributes.next_rising),
+        }
     }
 }

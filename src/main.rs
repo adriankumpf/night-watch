@@ -21,6 +21,10 @@ use sun::{Event, Sun};
 #[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "night-watch")]
 struct Args {
+    /// Default camera
+    #[structopt(short, long, default_value = "default")]
+    camera: String,
+
     /// The HA url
     #[structopt(short, long, default_value = "http://localhost:8123")]
     url: Url,
@@ -75,9 +79,10 @@ impl From<Args> for MqttOptions {
     }
 }
 
-fn spawn_mqtt_client(camera: Arc<RwLock<String>>, args: Args) {
+fn spawn_mqtt_client(camera: Arc<RwLock<String>>, args: Args) -> MqttClient {
     let topic = args.topic.clone();
     let (mut mqtt_client, notifications) = MqttClient::start(args.into()).unwrap();
+
     mqtt_client.subscribe(topic, QoS::AtLeastOnce).unwrap();
 
     thread::spawn(move || {
@@ -89,6 +94,8 @@ fn spawn_mqtt_client(camera: Arc<RwLock<String>>, args: Args) {
             }
         }
     });
+
+    mqtt_client
 }
 
 #[inline]
@@ -103,15 +110,18 @@ async fn main() -> Result<()> {
     env_logger::builder()
         .format_timestamp(None)
         .format_module_path(false)
-        .filter_level(if args.debug {
-            LevelFilter::Debug
-        } else {
-            LevelFilter::Info
-        })
+        .filter(
+            Some("night_watch"),
+            if args.debug {
+                LevelFilter::Debug
+            } else {
+                LevelFilter::Info
+            },
+        )
         .init();
 
-    let camera = Arc::new(RwLock::new("default".to_string()));
-    spawn_mqtt_client(camera.clone(), args.clone());
+    let camera = Arc::new(RwLock::new(args.camera.clone()));
+    let _mqtt_client = spawn_mqtt_client(camera.clone(), args.clone());
 
     let ha = HomeAssistant::new(args.url, &args.token)?;
     let cam = Camera::new(&ha);
@@ -120,26 +130,34 @@ async fn main() -> Result<()> {
     'events: loop {
         let next_event = sun.next().await;
 
-        let (start, end, event) = match next_event {
-            Event::Dusk { start, end } => (start, end, &args.night_event),
-            Event::Dawn { start, end } => (start, end, &args.day_event),
-        };
+        let event_in = until(&next_event);
+        let event_in_hours = event_in.num_minutes() as f32 / 60.0;
+        info!("Next {} in {:.1} hours", next_event, event_in_hours);
 
-        let sleep_for = until(&start);
-        let sleep_for_hours = sleep_for.num_minutes() as f32 / 60.0;
-        info!("Next {} in {:.1} hours", next_event, sleep_for_hours);
-        timer::delay_for(sleep_for.to_std()?).await;
-        info!("{} in {} minutes", next_event, until(&start).num_minutes());
+        if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
+            timer::delay_for(sleep_for).await;
+        }
+
+        info!("{} in {} min", next_event, until(&next_event).num_minutes());
 
         loop {
             let night_vision = cam.night_vision(&camera.read().unwrap()).await?;
 
             if match next_event {
-                Event::Dawn { start: _, end: _ } => !night_vision,
-                Event::Dusk { start: _, end: _ } => night_vision,
+                Event::Sunrise(_) => !night_vision,
+                Event::Sunset(_) => night_vision,
             } {
+                let event = match next_event {
+                    Event::Sunset(_) => &args.night_event,
+                    Event::Sunrise(_) => &args.day_event,
+                };
+
                 let result = ha.send_event(&event).await?;
-                info!("{} [{:+}]", result.message, until(&end).num_minutes() * -1);
+                info!(
+                    "{} [{:+}]",
+                    result.message,
+                    until(&next_event).num_minutes() * -1
+                );
                 continue 'events;
             }
 
