@@ -7,10 +7,10 @@ use reqwest::Url;
 use structopt::StructOpt;
 use tokio::timer;
 
-use client::{Client, Entity, EventResult, State, Sun};
+use client::{EventResult, HomeAssistant, State};
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "sun-events")]
+#[structopt(name = "night-watch")]
 struct Args {
     /// The camera (HA entitiy)
     #[structopt(short, long)]
@@ -55,30 +55,14 @@ fn is_grayscale(image: RgbImage) -> bool {
     is_grayscale
 }
 
-async fn fetch_sun(client: &Client) -> Entity<Sun, State> {
-    let mut i = 0;
-
-    loop {
-        match client.get_sun().await {
-            Err(_e) => {
-                let s = 2u64.pow(i);
-                println!("Home Assistant is not available. Retrying in {}s", s);
-                timer::delay_for(std::time::Duration::from_secs(s)).await;
-                i += 1;
-            },
-            Ok(sun) => return sun,
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::from_args();
 
-    let client = Client::new(args.url, &args.token)?;
+    let ha = HomeAssistant::new(args.url, &args.token)?;
 
     loop {
-        let sun = fetch_sun(&client).await;
+        let sun = ha.fetch_sun().await;
 
         let next_event = std::cmp::min(sun.attributes.next_dawn, sun.attributes.next_dusk);
 
@@ -95,7 +79,7 @@ async fn main() -> Result<()> {
         println!("{} in {} minutes", kind, (time - Utc::now()).num_minutes());
 
         loop {
-            let image = client.get_image(&args.camera).await?;
+            let image = ha.get_image(&args.camera).await?;
 
             if match sun.state {
                 State::BelowHorizon => !is_grayscale(image),
@@ -107,7 +91,7 @@ async fn main() -> Result<()> {
             timer::delay_for(std::time::Duration::from_secs(10)).await;
         }
 
-        let EventResult { message } = client.post_event(&event).await?;
+        let EventResult { message } = ha.send_event(&event).await?;
         println!("{} [{:+}]", message, (Utc::now() - time).num_minutes());
     }
 }

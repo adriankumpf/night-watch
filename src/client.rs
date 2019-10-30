@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tokio::timer;
 use chrono::prelude::*;
 use image::RgbImage;
 use reqwest::{header, Url};
@@ -33,13 +34,13 @@ pub struct Sun {
 }
 
 #[derive(Clone)]
-pub struct Client {
+pub struct HomeAssistant {
     client: reqwest::Client,
     base: Url,
 }
 
-impl Client {
-    pub fn new(base: Url, token: &str) -> Result<Client> {
+impl HomeAssistant {
+    pub fn new(base: Url, token: &str) -> Result<Self> {
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -50,7 +51,23 @@ impl Client {
             .default_headers(headers)
             .build()?;
 
-        Ok(Client { client, base })
+        Ok(Self { client, base })
+    }
+
+    pub async fn fetch_sun(&self) -> Entity<Sun, State> {
+        let mut i = 0;
+
+        loop {
+            match self.get_sun().await {
+                Err(_e) => {
+                    let s = 2u64.pow(i);
+                    println!("Home Assistant is not available. Retrying in {}s", s);
+                    timer::delay_for(std::time::Duration::from_secs(s)).await;
+                    i += 1;
+                }
+                Ok(sun) => return sun,
+            }
+        }
     }
 
     pub async fn get_sun(&self) -> Result<Entity<Sun, State>> {
@@ -87,7 +104,7 @@ impl Client {
         Ok(image)
     }
 
-    pub async fn post_event(&self, event: &str) -> Result<EventResult> {
+    pub async fn send_event(&self, event: &str) -> Result<EventResult> {
         let url = self.base.join(&format!("/api/events/{}", event))?;
 
         let result = self

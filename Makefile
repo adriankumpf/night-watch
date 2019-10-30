@@ -6,4 +6,4 @@ help:
 
 .PHONY: build
 build: ## Build docker image with the release
-	@docker build -t adriankumpf/sun-events .
+	@docker build -t adriankumpf/night-watch .

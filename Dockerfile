@@ -15,7 +15,7 @@ RUN sudo chown -R rust:rust src/ Cargo.* target/
 RUN touch src/main.rs
 RUN cargo build --release
 
-RUN strip target/x86_64-unknown-linux-musl/release/sun-events
+RUN strip target/x86_64-unknown-linux-musl/release/night-watch
 
 ##########################################################
 
@@ -24,8 +24,8 @@ FROM scratch
 WORKDIR /home/rust/
 
 COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /home/rust/target/x86_64-unknown-linux-musl/release/sun-events .
+COPY --from=builder /home/rust/target/x86_64-unknown-linux-musl/release/night-watch .
 
 USER appuser
 
-ENTRYPOINT ["./sun-events"]
+ENTRYPOINT ["./night-watch"]
