@@ -8,8 +8,6 @@ use tokio::timer;
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
     pub attributes: T,
-    pub last_changed: DateTime<Utc>,
-    pub last_updated: DateTime<Utc>,
     pub state: S,
 }
 

@@ -1,5 +1,8 @@
 mod camera;
 mod home_assistant;
+mod sun;
+
+use std::time::Duration;
 
 use anyhow::Result;
 use chrono::prelude::*;
@@ -8,7 +11,8 @@ use structopt::StructOpt;
 use tokio::timer;
 
 use camera::Camera;
-use home_assistant::{EventResult, HomeAssistant, State};
+use home_assistant::HomeAssistant;
+use sun::{Event, Sun};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "night-watch")]
@@ -34,44 +38,47 @@ struct Args {
     day_event: String,
 }
 
+#[inline]
+fn until(time: &DateTime<Utc>) -> chrono::Duration {
+    *time - Utc::now()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::from_args();
 
     let ha = HomeAssistant::new(args.url, &args.token)?;
     let cam = Camera::new(&ha, args.camera);
+    let sun = Sun::new(&ha);
 
     loop {
-        let sun = ha.fetch_sun().await;
+        let next_event = sun.next().await?;
 
-        let next_event = std::cmp::min(sun.attributes.next_dawn, sun.attributes.next_dusk);
-
-        let (kind, time, event) = match sun.state {
-            State::BelowHorizon => ("Sunrise", sun.attributes.next_rising, &args.day_event),
-            State::AboveHorizon => ("Sunset", sun.attributes.next_setting, &args.night_event),
+        let (start, end, event) = match next_event {
+            Event::Dusk { start, end } => (start, end, &args.night_event),
+            Event::Dawn { start, end } => (start, end, &args.day_event),
         };
 
-        let sleep_for_hours = (time - Utc::now()).num_minutes() as f32 / 60.0;
-        println!("Next {} in {:.1} hours", kind, sleep_for_hours);
-
-        timer::delay_for((next_event - Utc::now()).to_std()?).await;
-
-        println!("{} in {} minutes", kind, (time - Utc::now()).num_minutes());
+        let sleep_for = until(&start);
+        let sleep_for_hours = sleep_for.num_minutes() as f32 / 60.0;
+        println!("Next {} in {:.1} hours", next_event, sleep_for_hours);
+        timer::delay_for(sleep_for.to_std()?).await;
+        println!("{} in {} minutes", next_event, until(&start).num_minutes());
 
         loop {
             let night_vision = cam.night_vision().await?;
 
-            if match sun.state {
-                State::BelowHorizon => !night_vision,
-                State::AboveHorizon => night_vision,
+            if match next_event {
+                Event::Dawn { start: _, end: _ } => !night_vision,
+                Event::Dusk { start: _, end: _ } => night_vision,
             } {
                 break;
             }
 
-            timer::delay_for(std::time::Duration::from_secs(10)).await;
+            timer::delay_for(Duration::from_secs(10)).await;
         }
 
-        let EventResult { message } = ha.send_event(&event).await?;
-        println!("{} [{:+}]", message, (Utc::now() - time).num_minutes());
+        let result = ha.send_event(&event).await?;
+        println!("{} [{:+}]", result.message, until(&end).num_minutes() * -1);
     }
 }
