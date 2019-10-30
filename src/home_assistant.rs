@@ -46,14 +46,9 @@ impl HomeAssistant {
 
         loop {
             match self.get_entity(entity).await {
-                Err(error) => {
+                Err(_error) => {
                     let secs = 2u64.pow(i);
-
-                    warn!(
-                        "Home Assistant is not available. Retrying in {}s – {:#?}",
-                        secs, error
-                    );
-
+                    warn!("Home Assistant is not available. Retrying in {}s", secs);
                     timer::delay_for(std::time::Duration::from_secs(secs)).await;
                     i += 1;
                 }

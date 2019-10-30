@@ -6,19 +6,15 @@ use crate::home_assistant::HomeAssistant;
 
 pub struct Camera<'a> {
     home_assistant: &'a HomeAssistant,
-    entitiy: String,
 }
 
 impl<'a> Camera<'a> {
-    pub fn new(home_assistant: &'a HomeAssistant, entitiy: String) -> Self {
-        Self {
-            home_assistant,
-            entitiy,
-        }
+    pub fn new(home_assistant: &'a HomeAssistant) -> Self {
+        Self { home_assistant }
     }
 
-    pub async fn night_vision(&self) -> Result<bool> {
-        let image = self.home_assistant.get_camera_image(&self.entitiy).await?;
+    pub async fn night_vision(&self, camera: &str) -> Result<bool> {
+        let image = self.home_assistant.get_camera_image(camera).await?;
 
         let mut diff = 0;
 
