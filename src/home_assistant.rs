@@ -1,9 +1,9 @@
 use anyhow::Result;
-use tokio::timer;
 use chrono::prelude::*;
 use image::RgbImage;
 use reqwest::{header, Url};
 use serde::Deserialize;
+use tokio::timer;
 
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
