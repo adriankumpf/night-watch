@@ -12,3 +12,5 @@ tokio = "0.2.0-alpha.6"
 serde = { version = "1.0.102", features = ["derive"] }
 chrono = { version = "0.4.9", features = ["serde"] }
 image = "0.22.3"
+env_logger = "0.7.1"
+log = "0.4.8"

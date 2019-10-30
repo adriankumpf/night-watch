@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::prelude::*;
+use log::{info, LevelFilter};
 use reqwest::Url;
 use structopt::StructOpt;
 use tokio::timer;
@@ -36,6 +37,10 @@ struct Args {
     /// The open event
     #[structopt(long, default_value = "open_rollershutters")]
     day_event: String,
+
+    /// Activate debug mode
+    #[structopt(short, long)]
+    debug: bool,
 }
 
 #[inline]
@@ -47,11 +52,21 @@ fn until(time: &DateTime<Utc>) -> chrono::Duration {
 async fn main() -> Result<()> {
     let args = Args::from_args();
 
+    env_logger::builder()
+        .format_timestamp(None)
+        .format_module_path(false)
+        .filter_level(if args.debug {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
+        })
+        .init();
+
     let ha = HomeAssistant::new(args.url, &args.token)?;
     let cam = Camera::new(&ha, args.camera);
     let sun = Sun::new(&ha);
 
-    loop {
+    'events: loop {
         let next_event = sun.next().await?;
 
         let (start, end, event) = match next_event {
@@ -61,9 +76,9 @@ async fn main() -> Result<()> {
 
         let sleep_for = until(&start);
         let sleep_for_hours = sleep_for.num_minutes() as f32 / 60.0;
-        println!("Next {} in {:.1} hours", next_event, sleep_for_hours);
+        info!("Next {} in {:.1} hours", next_event, sleep_for_hours);
         timer::delay_for(sleep_for.to_std()?).await;
-        println!("{} in {} minutes", next_event, until(&start).num_minutes());
+        info!("{} in {} minutes", next_event, until(&start).num_minutes());
 
         loop {
             let night_vision = cam.night_vision().await?;
@@ -72,13 +87,12 @@ async fn main() -> Result<()> {
                 Event::Dawn { start: _, end: _ } => !night_vision,
                 Event::Dusk { start: _, end: _ } => night_vision,
             } {
-                break;
+                let result = ha.send_event(&event).await?;
+                info!("{} [{:+}]", result.message, until(&end).num_minutes() * -1);
+                continue 'events;
             }
 
-            timer::delay_for(Duration::from_secs(10)).await;
+            timer::delay_for(Duration::from_secs(30)).await;
         }
-
-        let result = ha.send_event(&event).await?;
-        println!("{} [{:+}]", result.message, until(&end).num_minutes() * -1);
     }
 }

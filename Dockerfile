@@ -10,8 +10,8 @@ RUN sudo chown -R rust:rust Cargo.*
 RUN echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 
-COPY . .
-RUN sudo chown -R rust:rust src/ Cargo.* target/
+COPY src src
+RUN sudo chown -R rust:rust src/ Cargo.*
 RUN touch src/main.rs
 RUN cargo build --release
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::prelude::*;
 use image::RgbImage;
+use log::warn;
 use reqwest::{header, Url};
 use serde::Deserialize;
 use tokio::timer;
@@ -57,10 +58,15 @@ impl HomeAssistant {
 
         loop {
             match self.get_sun().await {
-                Err(_e) => {
-                    let s = 2u64.pow(i);
-                    println!("Home Assistant is not available. Retrying in {}s", s);
-                    timer::delay_for(std::time::Duration::from_secs(s)).await;
+                Err(error) => {
+                    let secs = 2u64.pow(i);
+
+                    warn!(
+                        "Home Assistant is not available. Retrying in {}s – {:#?}",
+                        secs, error
+                    );
+
+                    timer::delay_for(std::time::Duration::from_secs(secs)).await;
                     i += 1;
                 }
                 Ok(sun) => return sun,

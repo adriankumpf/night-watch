@@ -1,5 +1,6 @@
 use anyhow::Result;
 use image::Pixel;
+use log::debug;
 
 use crate::home_assistant::HomeAssistant;
 
@@ -35,7 +36,7 @@ impl<'a> Camera<'a> {
         let f = (diff as f64) / (image.width() * image.height()) as f64 / (255.0 * 3.0);
         let night_vision = f < 0.001;
 
-        println!("{} – night_vision: {}", f, night_vision);
+        debug!("{} – night_vision: {}", f, night_vision);
 
         Ok(night_vision)
     }
