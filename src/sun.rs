@@ -1,13 +1,23 @@
-use std::cmp;
-use std::fmt;
+use std::{cmp, fmt};
 
-use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
+use serde::Deserialize;
 
-use crate::home_assistant::HomeAssistant;
+use crate::home_assistant::{Entity, HomeAssistant};
 
-pub struct Sun<'a> {
-    home_assistant: &'a HomeAssistant,
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum State {
+    BelowHorizon,
+    AboveHorizon,
+}
+
+#[derive(Debug, Deserialize)]
+struct Attributes {
+    pub next_rising: DateTime<Utc>,
+    pub next_setting: DateTime<Utc>,
+    pub next_dawn: DateTime<Utc>,
+    pub next_dusk: DateTime<Utc>,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug)]
@@ -31,13 +41,17 @@ impl fmt::Display for Event {
     }
 }
 
+pub struct Sun<'a> {
+    home_assistant: &'a HomeAssistant,
+}
+
 impl<'a> Sun<'a> {
     pub fn new(home_assistant: &'a HomeAssistant) -> Self {
         Self { home_assistant }
     }
 
-    pub async fn next(&self) -> Result<Event> {
-        let sun = self.home_assistant.fetch_sun().await;
+    pub async fn next(&self) -> Event {
+        let sun: Entity<Attributes, State> = self.home_assistant.fetch_entity("sun.sun").await;
 
         let dawn = Event::Dawn {
             start: sun.attributes.next_dawn,
@@ -48,6 +62,6 @@ impl<'a> Sun<'a> {
             end: sun.attributes.next_setting,
         };
 
-        Ok(cmp::min(dusk, dawn))
+        cmp::min(dusk, dawn)
     }
 }

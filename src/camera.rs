@@ -18,7 +18,7 @@ impl<'a> Camera<'a> {
     }
 
     pub async fn night_vision(&self) -> Result<bool> {
-        let image = self.home_assistant.get_image(&self.entitiy).await?;
+        let image = self.home_assistant.get_camera_image(&self.entitiy).await?;
 
         let mut diff = 0;
 

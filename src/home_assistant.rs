@@ -1,9 +1,8 @@
 use anyhow::Result;
-use chrono::prelude::*;
 use image::RgbImage;
 use log::warn;
 use reqwest::{header, Url};
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use tokio::timer;
 
 #[derive(Debug, Deserialize)]
@@ -15,21 +14,6 @@ pub struct Entity<T, S> {
 #[derive(Debug, Deserialize)]
 pub struct EventResult {
     pub message: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum State {
-    BelowHorizon,
-    AboveHorizon,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Sun {
-    pub next_rising: DateTime<Utc>,
-    pub next_setting: DateTime<Utc>,
-    pub next_dawn: DateTime<Utc>,
-    pub next_dusk: DateTime<Utc>,
 }
 
 #[derive(Clone)]
@@ -53,11 +37,15 @@ impl HomeAssistant {
         Ok(Self { client, base })
     }
 
-    pub async fn fetch_sun(&self) -> Entity<Sun, State> {
+    pub async fn fetch_entity<T, S>(&self, entity: &str) -> Entity<T, S>
+    where
+        S: DeserializeOwned,
+        T: DeserializeOwned,
+    {
         let mut i = 0;
 
         loop {
-            match self.get_sun().await {
+            match self.get_entity(entity).await {
                 Err(error) => {
                     let secs = 2u64.pow(i);
 
@@ -74,8 +62,12 @@ impl HomeAssistant {
         }
     }
 
-    pub async fn get_sun(&self) -> Result<Entity<Sun, State>> {
-        let url = self.base.join("/api/states/sun.sun")?;
+    pub async fn get_entity<T, S>(&self, entity: &str) -> Result<Entity<T, S>>
+    where
+        S: DeserializeOwned,
+        T: DeserializeOwned,
+    {
+        let url = self.base.join(&format!("/api/states/{}", entity))?;
 
         let state = self
             .client
@@ -89,7 +81,7 @@ impl HomeAssistant {
         Ok(state)
     }
 
-    pub async fn get_image(&self, camera: &str) -> Result<RgbImage> {
+    pub async fn get_camera_image(&self, camera: &str) -> Result<RgbImage> {
         let url = self
             .base
             .join(&format!("/api/camera_proxy/camera.{}", camera))?;

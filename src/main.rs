@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
     let sun = Sun::new(&ha);
 
     'events: loop {
-        let next_event = sun.next().await?;
+        let next_event = sun.next().await;
 
         let (start, end, event) = match next_event {
             Event::Dusk { start, end } => (start, end, &args.night_event),
