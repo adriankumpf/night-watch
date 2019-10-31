@@ -14,4 +14,3 @@ chrono = { version = "0.4.9", features = ["serde"] }
 image = "0.22.3"
 env_logger = "0.7.1"
 log = "0.4.8"
-rumqtt = "0.31.0"

@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Deref;
 
+use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
 use serde::Deserialize;
 
@@ -54,12 +55,14 @@ impl<'a> Sun<'a> {
         Self { home_assistant }
     }
 
-    pub async fn next(&self) -> Event {
-        let sun: Entity<Attributes, State> = self.home_assistant.fetch_entity("sun.sun").await;
+    pub async fn next(&self) -> Result<Event> {
+        let sun: Entity<Attributes, State> = self.home_assistant.get_entity("sun.sun").await?;
 
-        match sun.state {
+        let event = match sun.state {
             State::AboveHorizon => Event::Sunset(sun.attributes.next_setting),
             State::BelowHorizon => Event::Sunrise(sun.attributes.next_rising),
-        }
+        };
+
+        Ok(event)
     }
 }

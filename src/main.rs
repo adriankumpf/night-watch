@@ -2,15 +2,12 @@ mod camera;
 mod home_assistant;
 mod sun;
 
-use std::sync::{Arc, RwLock};
-use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::prelude::*;
-use log::{info, LevelFilter};
+use log::{info, warn, LevelFilter};
 use reqwest::Url;
-use rumqtt::{mqttoptions, MqttClient, MqttOptions, Notification, QoS};
 use structopt::StructOpt;
 use tokio::timer;
 
@@ -21,9 +18,9 @@ use sun::{Event, Sun};
 #[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "night-watch")]
 struct Args {
-    /// Default camera
-    #[structopt(short, long, default_value = "default")]
-    camera: String,
+    /// Input select for camera
+    #[structopt(short, long, default_value = "night_watch")]
+    select: String,
 
     /// The HA url
     #[structopt(short, long, default_value = "http://localhost:8123")]
@@ -44,58 +41,6 @@ struct Args {
     /// Activate debug mode
     #[structopt(short, long)]
     debug: bool,
-
-    /// MQTT topic
-    #[structopt(long, default_value = "nightwatch/settings/camera")]
-    topic: String,
-
-    /// MQTT host
-    #[structopt(long, default_value = "localhost")]
-    mqtt_host: String,
-
-    /// MQTT port
-    #[structopt(long, default_value = "1883")]
-    mqtt_port: u16,
-
-    /// MQTT username
-    #[structopt(long)]
-    mqtt_username: Option<String>,
-
-    /// MQTT password
-    #[structopt(long)]
-    mqtt_password: Option<String>,
-}
-
-impl From<Args> for MqttOptions {
-    fn from(args: Args) -> MqttOptions {
-        let mut mqtt_options = MqttOptions::new("night-watch", args.mqtt_host, 1883);
-
-        if let (Some(user), Some(pass)) = (args.mqtt_username, args.mqtt_password) {
-            mqtt_options = mqtt_options
-                .set_security_opts(mqttoptions::SecurityOptions::UsernamePassword(user, pass))
-        };
-
-        mqtt_options
-    }
-}
-
-fn spawn_mqtt_client(camera: Arc<RwLock<String>>, args: Args) -> MqttClient {
-    let topic = args.topic.clone();
-    let (mut mqtt_client, notifications) = MqttClient::start(args.into()).unwrap();
-
-    mqtt_client.subscribe(topic, QoS::AtLeastOnce).unwrap();
-
-    thread::spawn(move || {
-        for notification in notifications {
-            if let Notification::Publish(packet) = notification {
-                let mut camera = camera.write().unwrap();
-                *camera = String::from_utf8_lossy(&packet.payload).to_string();
-                info!("Chaging camera to '{}'", camera);
-            }
-        }
-    });
-
-    mqtt_client
 }
 
 #[inline]
@@ -120,15 +65,25 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let camera = Arc::new(RwLock::new(args.camera.clone()));
-    let _mqtt_client = spawn_mqtt_client(camera.clone(), args.clone());
-
     let ha = HomeAssistant::new(args.url, &args.token)?;
-    let cam = Camera::new(&ha);
+    let cam = Camera::new(&ha, &args.select);
     let sun = Sun::new(&ha);
 
+    let mut i = 0;
+    loop {
+        match cam.selected_camera().await {
+            Err(_error) => {
+                let secs = 2u64.pow(i);
+                warn!("Home Assistant is not available. Retrying in {}s", secs);
+                timer::delay_for(std::time::Duration::from_secs(secs)).await;
+                i += 1;
+            }
+            Ok(camera) => break info!("Camera: {}", camera),
+        }
+    }
+
     'events: loop {
-        let next_event = sun.next().await;
+        let next_event = sun.next().await?;
 
         let event_in = until(&next_event);
         let event_in_hours = event_in.num_minutes() as f32 / 60.0;
@@ -141,7 +96,7 @@ async fn main() -> Result<()> {
         info!("{} in {} min", next_event, until(&next_event).num_minutes());
 
         loop {
-            let night_vision = cam.night_vision(&camera.read().unwrap()).await?;
+            let night_vision = cam.night_vision().await?;
 
             if match next_event {
                 Event::Sunrise(_) => !night_vision,

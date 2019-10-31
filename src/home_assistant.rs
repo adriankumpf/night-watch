@@ -1,9 +1,7 @@
 use anyhow::Result;
 use image::RgbImage;
-use log::warn;
 use reqwest::{header, Url};
 use serde::{de::DeserializeOwned, Deserialize};
-use tokio::timer;
 
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
@@ -35,26 +33,6 @@ impl HomeAssistant {
             .build()?;
 
         Ok(Self { client, base })
-    }
-
-    pub async fn fetch_entity<T, S>(&self, entity: &str) -> Entity<T, S>
-    where
-        S: DeserializeOwned,
-        T: DeserializeOwned,
-    {
-        let mut i = 0;
-
-        loop {
-            match self.get_entity(entity).await {
-                Err(_error) => {
-                    let secs = 2u64.pow(i);
-                    warn!("Home Assistant is not available. Retrying in {}s", secs);
-                    timer::delay_for(std::time::Duration::from_secs(secs)).await;
-                    i += 1;
-                }
-                Ok(sun) => return sun,
-            }
-        }
     }
 
     pub async fn get_entity<T, S>(&self, entity: &str) -> Result<Entity<T, S>>
