@@ -31,12 +31,16 @@ struct Args {
     token: String,
 
     /// The close event
-    #[structopt(long, default_value = "close_rollershutters")]
+    #[structopt(short = "N", long, default_value = "close_rollershutters")]
     night_event: String,
 
     /// The open event
-    #[structopt(long, default_value = "open_rollershutters")]
+    #[structopt(short = "D", long, default_value = "open_rollershutters")]
     day_event: String,
+
+    /// Polling interval (seconds)
+    #[structopt(short, long, default_value = "30")]
+    interval: u16,
 
     /// Activate debug mode
     #[structopt(short, long)]
@@ -82,41 +86,35 @@ async fn main() -> Result<()> {
         }
     }
 
-    'events: loop {
-        let next_event = sun.next().await?;
+    'main: loop {
+        for next_event in &sun.next_events().await? {
+            let event_in = until(&next_event);
+            let event_in_hours = event_in.num_minutes() as f32 / 60.0;
+            info!("Next {} in {:.1} hours", next_event, event_in_hours);
 
-        let event_in = until(&next_event);
-        let event_in_hours = event_in.num_minutes() as f32 / 60.0;
-        info!("Next {} in {:.1} hours", next_event, event_in_hours);
-
-        if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
-            timer::delay_for(sleep_for).await;
-        }
-
-        info!("{} in {} min", next_event, until(&next_event).num_minutes());
-
-        loop {
-            let night_vision = cam.night_vision().await?;
-
-            if match next_event {
-                Event::Sunrise(_) => !night_vision,
-                Event::Sunset(_) => night_vision,
-            } {
-                let event = match next_event {
-                    Event::Sunset(_) => &args.night_event,
-                    Event::Sunrise(_) => &args.day_event,
-                };
-
-                let result = ha.send_event(&event).await?;
-                info!(
-                    "{} [{:+}]",
-                    result.message,
-                    until(&next_event).num_minutes() * -1
-                );
-                continue 'events;
+            if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
+                timer::delay_for(sleep_for).await;
             }
 
-            timer::delay_for(Duration::from_secs(30)).await;
+            info!("{} in {} min", next_event, until(&next_event).num_minutes());
+
+            'wait_for_event: loop {
+                let night_vision = cam.night_vision().await?;
+
+                let (do_send, ha_event) = match next_event {
+                    Event::Sunrise(_) => (!night_vision, &args.day_event),
+                    Event::Sunset(_) => (night_vision, &args.night_event),
+                };
+
+                if do_send {
+                    let result = ha.send_event(&ha_event).await?;
+                    let diff = -1 * until(&next_event).num_minutes();
+                    info!("{} [{:+}]", result.message, diff);
+                    break 'wait_for_event;
+                }
+
+                timer::delay_for(Duration::from_secs(args.interval.into())).await;
+            }
         }
     }
 }

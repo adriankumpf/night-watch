@@ -55,14 +55,17 @@ impl<'a> Sun<'a> {
         Self { home_assistant }
     }
 
-    pub async fn next(&self) -> Result<Event> {
+    pub async fn next_events(&self) -> Result<[Event; 2]> {
         let sun: Entity<Attributes, State> = self.home_assistant.get_entity("sun.sun").await?;
 
-        let event = match sun.state {
-            State::AboveHorizon => Event::Sunset(sun.attributes.next_setting),
-            State::BelowHorizon => Event::Sunrise(sun.attributes.next_rising),
+        let sunset = Event::Sunset(sun.attributes.next_setting);
+        let sunrise = Event::Sunrise(sun.attributes.next_rising);
+
+        let events = match sun.state {
+            State::AboveHorizon => [sunset, sunrise],
+            State::BelowHorizon => [sunrise, sunset],
         };
 
-        Ok(event)
+        Ok(events)
     }
 }
