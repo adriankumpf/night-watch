@@ -5,7 +5,7 @@ mod sun;
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::prelude::*;
+use chrono::{offset::Utc, DateTime};
 use log::{info, warn, LevelFilter};
 use reqwest::Url;
 use structopt::StructOpt;
@@ -18,31 +18,31 @@ use sun::{Event, Sun};
 #[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "night-watch")]
 struct Args {
-    /// Input select for camera
+    /// Input select entity for the camera
     #[structopt(short, long, default_value = "night_watch")]
     select: String,
 
-    /// The HA url
+    /// Base URL of HA
     #[structopt(short, long, default_value = "http://localhost:8123")]
     url: Url,
 
-    /// The access token for HA
+    /// Access token for HA
     #[structopt(short, long, env = "TOKEN")]
     token: String,
 
-    /// The close event
+    /// The event sent to HA when the camera turns on night vision
     #[structopt(short = "N", long, default_value = "close_rollershutters")]
     night_event: String,
 
-    /// The open event
+    /// The event sent to HA when the camera turns off night vision
     #[structopt(short = "D", long, default_value = "open_rollershutters")]
     day_event: String,
 
-    /// Polling interval (seconds)
+    /// Polling interval (in seconds)
     #[structopt(short, long, default_value = "30")]
     interval: u16,
 
-    /// Activate debug mode
+    /// Activates debug mode
     #[structopt(short, long)]
     debug: bool,
 }
@@ -52,30 +52,25 @@ fn until(time: &DateTime<Utc>) -> chrono::Duration {
     *time - Utc::now()
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::from_args();
-
+fn init_logger(debug: bool) {
     env_logger::builder()
         .format_timestamp(None)
         .format_module_path(false)
         .filter(
             Some("night_watch"),
-            if args.debug {
+            if debug {
                 LevelFilter::Debug
             } else {
                 LevelFilter::Info
             },
         )
         .init();
+}
 
-    let ha = HomeAssistant::new(args.url, &args.token)?;
-    let cam = Camera::new(&ha, &args.select);
-    let sun = Sun::new(&ha);
-
+async fn wait_for_homeassistant(camera: &Camera<'_>) {
     let mut i = 0;
     loop {
-        match cam.selected_camera().await {
+        match camera.selected_camera().await {
             Err(_error) => {
                 let secs = 2u64.pow(i);
                 warn!("Home Assistant is not available. Retrying in {}s", secs);
@@ -85,6 +80,19 @@ async fn main() -> Result<()> {
             Ok(camera) => break info!("Camera: {}", camera),
         }
     }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::from_args();
+
+    init_logger(args.debug);
+
+    let ha = HomeAssistant::new(args.url, &args.token)?;
+    let cam = Camera::new(&ha, &args.select);
+    let sun = Sun::new(&ha);
+
+    wait_for_homeassistant(&cam).await;
 
     'main: loop {
         for next_event in &sun.next_events().await? {
@@ -98,7 +106,7 @@ async fn main() -> Result<()> {
 
             info!("{} in {} min", next_event, until(&next_event).num_minutes());
 
-            'wait_for_event: loop {
+            let ha_event = 'wait_for_event: loop {
                 let night_vision = cam.night_vision().await?;
 
                 let (do_send, ha_event) = match next_event {
@@ -107,14 +115,16 @@ async fn main() -> Result<()> {
                 };
 
                 if do_send {
-                    let result = ha.send_event(&ha_event).await?;
-                    let diff = -1 * until(&next_event).num_minutes();
-                    info!("{} [{:+}]", result.message, diff);
-                    break 'wait_for_event;
+                    break 'wait_for_event ha_event;
                 }
 
                 timer::delay_for(Duration::from_secs(args.interval.into())).await;
-            }
+            };
+
+            let result = ha.send_event(&ha_event).await?;
+            let diff = -1 * until(&next_event).num_minutes();
+
+            info!("{} [{:+}]", result.message, diff);
         }
     }
 }
