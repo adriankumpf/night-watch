@@ -18,9 +18,13 @@ use sun::{Event, Sun};
 #[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "night-watch")]
 struct Args {
+    /// Camera entity
+    #[structopt(short, long, conflicts_with = "select")]
+    camera: Option<String>,
+
     /// Input select entity for the camera
-    #[structopt(short, long, default_value = "night_watch")]
-    select: String,
+    #[structopt(short, long, conflicts_with = "camera")]
+    select: Option<String>,
 
     /// Base URL of HA
     #[structopt(short, long, default_value = "http://localhost:8123")]
@@ -42,9 +46,18 @@ struct Args {
     #[structopt(short, long, default_value = "30")]
     interval: u16,
 
+    /// Initiallly wait for HA to become avaiable
+    #[structopt(short, long)]
+    block: bool,
+
     /// Activates debug mode
     #[structopt(short, long)]
     debug: bool,
+}
+
+pub enum Source {
+    Camera(String),
+    Select(String),
 }
 
 #[inline]
@@ -67,17 +80,33 @@ fn init_logger(debug: bool) {
         .init();
 }
 
-async fn wait_for_homeassistant(camera: &Camera<'_>) {
+async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
     let mut i = 0;
+
     loop {
-        match camera.selected_camera().await {
-            Err(_error) => {
-                let secs = 2u64.pow(i);
-                warn!("Home Assistant is not available. Retrying in {}s", secs);
-                timer::delay_for(std::time::Duration::from_secs(secs)).await;
-                i += 1;
+        match camera.night_vision().await {
+            Ok(_night_vision) => return Ok(()),
+            Err(error) => {
+                use std::error::Error;
+                use std::io;
+
+                let io_error = error
+                    .downcast_ref::<reqwest::Error>()
+                    .and_then(|e| e.source())
+                    .and_then(|e| e.source())
+                    .and_then(|e| e.downcast_ref::<io::Error>())
+                    .map(|e| e.kind());
+
+                match io_error {
+                    Some(io::ErrorKind::ConnectionRefused) => {
+                        let secs = 2u64.pow(i);
+                        warn!("Home Assistant is not available. Retrying in {}s", secs);
+                        timer::delay_for(std::time::Duration::from_secs(secs)).await;
+                        i += 1;
+                    }
+                    _ => return Err(error),
+                }
             }
-            Ok(camera) => break info!("Camera: {}", camera),
         }
     }
 }
@@ -88,11 +117,19 @@ async fn main() -> Result<()> {
 
     init_logger(args.debug);
 
+    let source = match (args.camera, args.select) {
+        (Some(camera), _) => Source::Camera(camera),
+        (_, Some(select)) => Source::Select(select),
+        _ => unreachable!(),
+    };
+
     let ha = HomeAssistant::new(args.url, &args.token)?;
-    let cam = Camera::new(&ha, &args.select);
+    let cam = Camera::new(&ha, source);
     let sun = Sun::new(&ha);
 
-    wait_for_homeassistant(&cam).await;
+    if args.block {
+        wait_for_homeassistant(&cam).await?;
+    }
 
     'main: loop {
         for next_event in &sun.next_events().await? {

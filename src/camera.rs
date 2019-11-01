@@ -4,6 +4,7 @@ use log::debug;
 use serde::Deserialize;
 
 use crate::home_assistant::{Entity, HomeAssistant};
+use crate::Source;
 
 #[derive(Debug, Deserialize)]
 struct Attributes {
@@ -12,19 +13,23 @@ struct Attributes {
 
 pub struct Camera<'a> {
     home_assistant: &'a HomeAssistant,
-    select: &'a str,
+    source: Source,
 }
 
 impl<'a> Camera<'a> {
-    pub fn new(home_assistant: &'a HomeAssistant, select: &'a str) -> Self {
+    pub fn new(home_assistant: &'a HomeAssistant, source: Source) -> Self {
         Self {
             home_assistant,
-            select,
+            source,
         }
     }
 
     pub async fn night_vision(&self) -> Result<bool> {
-        let camera = self.selected_camera().await?;
+        let camera = match &self.source {
+            Source::Select(select) => self.selected_camera(&select).await?,
+            Source::Camera(camera) => camera.clone(), // TODO
+        };
+
         let image = self.home_assistant.get_camera_image(&camera).await?;
 
         let mut diff = 0;
@@ -48,10 +53,10 @@ impl<'a> Camera<'a> {
         Ok(night_vision)
     }
 
-    pub async fn selected_camera(&self) -> Result<String> {
+    async fn selected_camera(&self, select: &String) -> Result<String> {
         let select: Entity<Attributes, String> = self
             .home_assistant
-            .get_entity(&format!("input_select.{}", self.select))
+            .get_entity(&format!("input_select.{}", select))
             .await?;
 
         Ok(select.state.to_lowercase())
