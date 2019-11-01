@@ -1,5 +1,13 @@
 # night-watch
 
+A [Home Assistant](https://www.home-assistant.io/) extension to detect when an IP camera (de)activates its night vision.
+
+## Background
+
+This application has been developed to automatically determine the optimal time to open/close roller shutters – depending on the lighting conditions.
+
+## Usage
+
 ```man
 night-watch 0.1.0
 
@@ -23,3 +31,7 @@ OPTIONS:
 ARGS:
     <entity>    Entity
 ```
+
+## Requirements
+
+- Rust 1.39

@@ -53,7 +53,7 @@ impl<'a> Camera<'a> {
         Ok(night_vision)
     }
 
-    async fn selected_camera(&self, select: &String) -> Result<String> {
+    async fn selected_camera(&self, select: &str) -> Result<String> {
         let select: Entity<Attributes, String> = self
             .home_assistant
             .get_entity(&format!("input_select.{}", select))

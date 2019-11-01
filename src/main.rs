@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
             };
 
             let result = ha.send_event(&ha_event).await?;
-            let diff = -1 * until(&next_event).num_minutes();
+            let diff = -until(&next_event).num_minutes();
 
             info!("{} [{:+}]", result.message, diff);
         }
