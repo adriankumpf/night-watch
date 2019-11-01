@@ -4,18 +4,22 @@
 night-watch 0.1.0
 
 USAGE:
-    night-watch [FLAGS] [OPTIONS] --token <token>
+    night-watch [FLAGS] [OPTIONS] <entity> -T <token>
 
 FLAGS:
-    -d, --debug      Activate debug mode
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+    -d, --debug              Activates debug mode
+    -s, --from-select        Fetches the camera entity from an input_select element instead
+    -h, --help               Prints help information
+    -t, --test-connection    Tests the connection to HA and blocks until it is available
+    -V, --version            Prints version information
 
 OPTIONS:
-    -D, --day-event <day-event>        The open event [default: open_rollershutters]
-    -i, --interval <interval>          Polling interval (seconds) [default: 30]
-    -N, --night-event <night-event>    The close event [default: close_rollershutters]
-    -s, --select <select>              Input select for camera [default: night_watch]
-    -t, --token <token>                The access token for HA [env: TOKEN=]
-    -u, --url <url>                    The HA url [default: http://localhost:8123]
+    -I <interval>           Polling interval (in seconds) [default: 30]
+    -D <day-event>          Event sent to HA when the camera turns off night vision [default: open_rollershutters]
+    -N <night-event>        Event sent to HA when the camera turns on night vision [default: close_rollershutters]
+    -T <token>              Access token for HA [env: TOKEN]
+    -U <url>                Base URL of HA [default: http://localhost:8123]
+
+ARGS:
+    <entity>    Entity
 ```

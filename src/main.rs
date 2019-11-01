@@ -18,41 +18,41 @@ use sun::{Event, Sun};
 #[derive(StructOpt, Clone, Debug)]
 #[structopt(name = "night-watch")]
 struct Args {
-    /// Camera entity
-    #[structopt(short, long, conflicts_with = "select")]
-    camera: Option<String>,
-
-    /// Input select entity for the camera
-    #[structopt(short, long, conflicts_with = "camera")]
-    select: Option<String>,
-
-    /// Base URL of HA
-    #[structopt(short, long, default_value = "http://localhost:8123")]
-    url: Url,
-
-    /// Access token for HA
-    #[structopt(short, long, env = "TOKEN")]
-    token: String,
-
-    /// The event sent to HA when the camera turns on night vision
-    #[structopt(short = "N", long, default_value = "close_rollershutters")]
-    night_event: String,
-
-    /// The event sent to HA when the camera turns off night vision
-    #[structopt(short = "D", long, default_value = "open_rollershutters")]
-    day_event: String,
-
-    /// Polling interval (in seconds)
-    #[structopt(short, long, default_value = "30")]
-    interval: u16,
-
-    /// Initiallly wait for HA to become avaiable
-    #[structopt(short, long)]
-    block: bool,
-
     /// Activates debug mode
     #[structopt(short, long)]
     debug: bool,
+
+    /// Tests the connection to HA and blocks until it is available
+    #[structopt(short, long)]
+    test_connection: bool,
+
+    /// Fetches the camera entity from an input_select element instead
+    #[structopt(short = "s", long)]
+    from_select: bool,
+
+    /// Polling interval (in seconds)
+    #[structopt(short = "I", default_value = "30", display_order = 1)]
+    interval: u16,
+
+    /// Event sent to HA when the camera turns on night vision
+    #[structopt(short = "N", default_value = "close_rollershutters", display_order = 2)]
+    night_event: String,
+
+    /// Event sent to HA when the camera turns off night vision
+    #[structopt(short = "D", default_value = "open_rollershutters", display_order = 2)]
+    day_event: String,
+
+    /// Base URL of HA
+    #[structopt(short = "U", default_value = "http://localhost:8123")]
+    url: Url,
+
+    /// Access token for HA
+    #[structopt(short = "T", env = "TOKEN", hide_env_values = true)]
+    token: String,
+
+    /// Entity
+    #[structopt()]
+    entity: String,
 }
 
 pub enum Source {
@@ -117,17 +117,17 @@ async fn main() -> Result<()> {
 
     init_logger(args.debug);
 
-    let source = match (args.camera, args.select) {
-        (Some(camera), _) => Source::Camera(camera),
-        (_, Some(select)) => Source::Select(select),
-        _ => unreachable!(),
+    let source = if args.from_select {
+        Source::Select(args.entity)
+    } else {
+        Source::Camera(args.entity)
     };
 
     let ha = HomeAssistant::new(args.url, &args.token)?;
     let cam = Camera::new(&ha, source);
     let sun = Sun::new(&ha);
 
-    if args.block {
+    if args.test_connection {
         wait_for_homeassistant(&cam).await?;
     }
 
