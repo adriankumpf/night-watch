@@ -5,12 +5,17 @@ authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.18"
-structopt = "0.3.3"
-reqwest = { version = "0.10.0-alpha.1", features = ["json"] }
-tokio = "0.2.0-alpha.6"
+anyhow = "1.0.19"
+structopt = { version = "0.3.3", default-features = false, features = ["suggestions", "color"] }
+reqwest = { version = "0.10.0-alpha.1", default-features = false, features = ["json"] }
+tokio = { version = "0.2.0-alpha.6", default-features = false, features = ["rt-current-thread", "macros"] }
 serde = { version = "1.0.102", features = ["derive"] }
 chrono = { version = "0.4.9", features = ["serde"] }
-image = "0.22.3"
-env_logger = "0.7.1"
+image = { version = "0.22.3", default-features = false, features = ["jpeg"] }
+env_logger = { version = "0.7.1", default-features = false }
 log = "0.4.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = 'abort'
