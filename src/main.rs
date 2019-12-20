@@ -9,7 +9,7 @@ use chrono::{offset::Utc, DateTime};
 use log::{info, warn, LevelFilter};
 use reqwest::Url;
 use structopt::StructOpt;
-use tokio::timer;
+use tokio::time;
 
 use camera::Camera;
 use home_assistant::HomeAssistant;
@@ -94,6 +94,7 @@ async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
                     .downcast_ref::<reqwest::Error>()
                     .and_then(|e| e.source())
                     .and_then(|e| e.source())
+                    .and_then(|e| e.source())
                     .and_then(|e| e.downcast_ref::<io::Error>())
                     .map(|e| e.kind());
 
@@ -101,7 +102,7 @@ async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
                     Some(io::ErrorKind::ConnectionRefused) => {
                         let secs = 2u64.pow(i);
                         warn!("Home Assistant is not available. Retrying in {}s", secs);
-                        timer::delay_for(std::time::Duration::from_secs(secs)).await;
+                        time::delay_for(std::time::Duration::from_secs(secs)).await;
                         i += 1;
                     }
                     _ => return Err(error),
@@ -138,7 +139,7 @@ async fn main() -> Result<()> {
             info!("Next {} in {:.1} hours", next_event, event_in_hours);
 
             if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
-                timer::delay_for(sleep_for).await;
+                time::delay_for(sleep_for).await;
             }
 
             info!("{} in {} min", next_event, until(&next_event).num_minutes());
@@ -155,7 +156,7 @@ async fn main() -> Result<()> {
                     break 'wait_for_event ha_event;
                 }
 
-                timer::delay_for(Duration::from_secs(args.interval.into())).await;
+                time::delay_for(Duration::from_secs(args.interval.into())).await;
             };
 
             let result = ha.send_event(&ha_event).await?;
