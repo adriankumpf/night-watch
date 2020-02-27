@@ -138,6 +138,12 @@ async fn main() -> Result<()> {
             let event_in_hours = event_in.num_minutes() as f32 / 60.0;
             info!("Next {} in {:.1} hours", next_event, event_in_hours);
 
+            if event_in.num_milliseconds() <= 0 {
+                warn!("The {} is in the past", next_event);
+                time::delay_for(Duration::from_secs(5)).await;
+                continue 'main;
+            }
+
             if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
                 time::delay_for(sleep_for).await;
             }

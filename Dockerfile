@@ -1,4 +1,4 @@
-FROM ekidd/rust-musl-builder:1.40.0 as builder
+FROM ekidd/rust-musl-builder:1.41.0 as builder
 
 RUN sudo useradd -u 10001 appuser
 
