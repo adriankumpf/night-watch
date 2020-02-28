@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
-use log::{info, warn, LevelFilter};
+use log::{debug, info, warn, LevelFilter};
 use reqwest::Url;
 use structopt::StructOpt;
 use tokio::time;
@@ -132,14 +132,23 @@ async fn main() -> Result<()> {
         wait_for_homeassistant(&cam).await?;
     }
 
+    let mut last_event = None;
+
     'main: loop {
-        for next_event in &sun.next_events().await? {
-            let event_in = until(&next_event);
+        for event in &sun.next_events().await? {
+            if let (&Some(Event::Sunset(_)), Event::Sunset(_))
+            | (&Some(Event::Sunrise(_)), Event::Sunrise(_)) = (&last_event, event)
+            {
+                debug!("{} was already handled!", event);
+                continue;
+            }
+
+            let event_in = until(&event);
             let event_in_hours = event_in.num_minutes() as f32 / 60.0;
-            info!("Next {} in {:.1} hours", next_event, event_in_hours);
+            info!("Next {} in {:.1} hours", event, event_in_hours);
 
             if event_in.num_milliseconds() <= 0 {
-                warn!("The {} is in the past", next_event);
+                warn!("The {} is in the past", event);
                 time::delay_for(Duration::from_secs(5)).await;
                 continue 'main;
             }
@@ -148,12 +157,12 @@ async fn main() -> Result<()> {
                 time::delay_for(sleep_for).await;
             }
 
-            info!("{} in {} min", next_event, until(&next_event).num_minutes());
+            info!("{} in {} min", event, until(&event).num_minutes());
 
             let ha_event = 'wait_for_event: loop {
                 let night_vision = cam.night_vision().await?;
 
-                let (do_send, ha_event) = match next_event {
+                let (do_send, ha_event) = match event {
                     Event::Sunrise(_) => (!night_vision, &args.day_event),
                     Event::Sunset(_) => (night_vision, &args.night_event),
                 };
@@ -166,9 +175,11 @@ async fn main() -> Result<()> {
             };
 
             let result = ha.send_event(&ha_event).await?;
-            let diff = -until(&next_event).num_minutes();
+            let diff = -until(&event).num_minutes();
 
             info!("{} [{:+}]", result.message, diff);
+
+            last_event = Some(event.clone());
         }
     }
 }

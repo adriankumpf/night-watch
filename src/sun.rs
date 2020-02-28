@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
+use log::debug;
 use serde::Deserialize;
 
 use crate::home_assistant::{Entity, HomeAssistant};
@@ -20,7 +21,7 @@ struct Attributes {
     pub next_setting: DateTime<Utc>,
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub enum Event {
     Sunset(DateTime<Utc>),
     Sunrise(DateTime<Utc>),
@@ -65,6 +66,8 @@ impl<'a> Sun<'a> {
             State::AboveHorizon => [sunset, sunrise],
             State::BelowHorizon => [sunrise, sunset],
         };
+
+        debug!("Next events: {:#?}", events);
 
         Ok(events)
     }
