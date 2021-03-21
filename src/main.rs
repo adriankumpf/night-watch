@@ -102,7 +102,7 @@ async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
                     Some(io::ErrorKind::ConnectionRefused) => {
                         let secs = 2u64.pow(i);
                         warn!("Home Assistant is not available. Retrying in {}s", secs);
-                        time::delay_for(std::time::Duration::from_secs(secs)).await;
+                        time::sleep(std::time::Duration::from_secs(secs)).await;
                         i += 1;
                     }
                     _ => return Err(error),
@@ -149,12 +149,12 @@ async fn main() -> Result<()> {
 
             if event_in.num_milliseconds() <= 0 {
                 warn!("The {} is in the past", event);
-                time::delay_for(Duration::from_secs(5)).await;
+                time::sleep(Duration::from_secs(5)).await;
                 continue 'main;
             }
 
             if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
-                time::delay_for(sleep_for).await;
+                time::sleep(sleep_for).await;
             }
 
             info!("{} in {} min", event, until(&event).num_minutes());
@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
                     break 'wait_for_event ha_event;
                 }
 
-                time::delay_for(Duration::from_secs(args.interval.into())).await;
+                time::sleep(Duration::from_secs(args.interval.into())).await;
             };
 
             let result = ha.send_event(&ha_event).await?;

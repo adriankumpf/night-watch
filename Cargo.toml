@@ -5,15 +5,15 @@ authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0.31"
-structopt = { version = "0.3.14", default-features = false, features = ["suggestions", "color"] }
-reqwest = { version = "0.10.6", default-features = false, features = ["json"] }
-tokio = { version = "0.2.21", default-features = false, features = ["rt-threaded", "macros"] }
-serde = { version = "1.0.111", features = ["derive"] }
-chrono = { version = "0.4.11", features = ["serde"] }
-image = { version = "0.23.4", default-features = false, features= ["jpeg"] }
-env_logger = { version = "0.7.1", default-features = false }
-log = "0.4.8"
+anyhow = "1.0.39"
+structopt = { version = "0.3.21", default-features = false, features = ["suggestions", "color"] }
+reqwest = { version = "0.11.2", default-features = false, features = ["json"] }
+tokio = { version = "1.4.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0.124", features = ["derive"] }
+chrono = { version = "0.4.19", features = ["serde"] }
+image = { version = "0.23.14", default-features = false, features = ["jpeg"] }
+env_logger = { version = "0.8.3", default-features = false }
+log = "0.4.14"
 
 [profile.release]
 lto = true
