@@ -6,52 +6,52 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
+use clap::{crate_version, Parser};
 use log::{debug, info, warn, LevelFilter};
 use reqwest::Url;
-use structopt::StructOpt;
 use tokio::time;
 
 use camera::Camera;
 use home_assistant::HomeAssistant;
 use sun::{Event, Sun};
 
-#[derive(StructOpt, Clone, Debug)]
-#[structopt(name = "night-watch")]
+#[derive(Parser, Clone, Debug)]
+#[clap(name = "night-watch", version = crate_version!())]
 struct Args {
     /// Activates debug mode
-    #[structopt(short, long)]
+    #[clap(short, long)]
     debug: bool,
 
     /// Tests the connection to HA and blocks until it is available
-    #[structopt(short, long)]
+    #[clap(short, long)]
     test_connection: bool,
 
     /// Fetches the camera entity from an input_select element instead
-    #[structopt(short = "s", long)]
+    #[clap(short = 's', long)]
     from_select: bool,
 
     /// Polling interval (in seconds)
-    #[structopt(short = "I", default_value = "30", display_order = 1)]
+    #[clap(short = 'I', default_value = "30", display_order = 1)]
     interval: u16,
 
     /// Event sent to HA when the camera turns on night vision
-    #[structopt(short = "N", default_value = "close_rollershutters", display_order = 2)]
+    #[clap(short = 'N', default_value = "close_rollershutters", display_order = 2)]
     night_event: String,
 
     /// Event sent to HA when the camera turns off night vision
-    #[structopt(short = "D", default_value = "open_rollershutters", display_order = 2)]
+    #[clap(short = 'D', default_value = "open_rollershutters", display_order = 2)]
     day_event: String,
 
     /// Base URL of HA
-    #[structopt(short = "U", default_value = "http://localhost:8123")]
+    #[clap(short = 'U', default_value = "http://localhost:8123")]
     url: Url,
 
     /// Access token for HA
-    #[structopt(short = "T", env = "TOKEN", hide_env_values = true)]
+    #[clap(short = 'T', env = "TOKEN", hide_env_values = true)]
     token: String,
 
     /// Entity
-    #[structopt()]
+    #[clap()]
     entity: String,
 }
 
@@ -114,7 +114,7 @@ async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::from_args();
+    let args = Args::parse();
 
     init_logger(args.debug);
 
