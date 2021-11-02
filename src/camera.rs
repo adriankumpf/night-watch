@@ -26,7 +26,7 @@ impl<'a> Camera<'a> {
 
     pub async fn night_vision(&self) -> Result<bool> {
         let camera = match &self.source {
-            Source::Select(select) => self.selected_camera(&select).await?,
+            Source::Select(select) => self.selected_camera(select).await?,
             Source::Camera(camera) => camera.clone(), // TODO
         };
 

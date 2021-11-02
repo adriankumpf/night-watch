@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
                 continue;
             }
 
-            let event_in = until(&event);
+            let event_in = until(event);
             let event_in_hours = event_in.num_minutes() as f32 / 60.0;
             info!("Next {} in {:.1} hours", event, event_in_hours);
 
@@ -157,7 +157,7 @@ async fn main() -> Result<()> {
                 time::sleep(sleep_for).await;
             }
 
-            info!("{} in {} min", event, until(&event).num_minutes());
+            info!("{} in {} min", event, until(event).num_minutes());
 
             let ha_event = 'wait_for_event: loop {
                 let night_vision = cam.night_vision().await?;
@@ -174,8 +174,8 @@ async fn main() -> Result<()> {
                 time::sleep(Duration::from_secs(args.interval.into())).await;
             };
 
-            let result = ha.send_event(&ha_event).await?;
-            let diff = -until(&event).num_minutes();
+            let result = ha.send_event(ha_event).await?;
+            let diff = -until(event).num_minutes();
 
             info!("{} [{:+}]", result.message, diff);
 
