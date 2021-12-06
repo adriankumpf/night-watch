@@ -59,6 +59,8 @@ impl<'a> Camera<'a> {
             .get_entity(&format!("input_select.{}", select))
             .await?;
 
+        debug!("Select options: {:?}", select.attributes.options);
+
         Ok(select.state.to_lowercase())
     }
 }
