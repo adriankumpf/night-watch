@@ -7,7 +7,8 @@ help:
 build: ## Build docker image with the release
 	@docker build --pull \
 		-t adriankumpf/night-watch \
-		-t docker.pkg.github.com/adriankumpf/night-watch/night-watch:latest \
+		-t ghcr.io/adriankumpf/night-watch:latest \
 		.
-publish: ## Publish docker image to the GitHub Package Registry
-	@docker push docker.pkg.github.com/adriankumpf/night-watch/night-watch:latest
+
+publish: ## Publish docker image to the GitHub Container Registry
+	@docker push ghcr.io/adriankumpf/night-watch:latest
