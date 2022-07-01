@@ -8,7 +8,7 @@ edition = "2021"
 anyhow = "1.0.57"
 clap = { version = "3.1.18", default-features = false, features = ["std", "derive", "color", "cargo", "env"] }
 reqwest = { version = "0.11.10", default-features = false, features = ["json"] }
-tokio = { version = "1.18.2", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.19.2", default-features = false, features = ["macros", "rt-multi-thread"] }
 serde = { version = "1.0.137", features = ["derive"] }
 chrono = { version = "0.4.19", features = ["serde"] }
 image = { version = "0.24.2", default-features = false, features = ["jpeg"] }
