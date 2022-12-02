@@ -25,7 +25,7 @@ impl HomeAssistant {
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {}", token))?,
+            header::HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
 
         let client = reqwest::Client::builder()
@@ -40,7 +40,7 @@ impl HomeAssistant {
         S: DeserializeOwned,
         T: DeserializeOwned,
     {
-        let url = self.base.join(&format!("/api/states/{}", entity))?;
+        let url = self.base.join(&format!("/api/states/{entity}"))?;
 
         let state = self
             .client
@@ -57,7 +57,7 @@ impl HomeAssistant {
     pub async fn get_camera_image(&self, camera: &str) -> Result<RgbImage> {
         let url = self
             .base
-            .join(&format!("/api/camera_proxy/camera.{}", camera))?;
+            .join(&format!("/api/camera_proxy/camera.{camera}"))?;
 
         let bytes = self
             .client
@@ -74,7 +74,7 @@ impl HomeAssistant {
     }
 
     pub async fn send_event(&self, event: &str) -> Result<EventResult> {
-        let url = self.base.join(&format!("/api/events/{}", event))?;
+        let url = self.base.join(&format!("/api/events/{event}"))?;
 
         let result = self
             .client

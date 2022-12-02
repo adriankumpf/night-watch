@@ -2,11 +2,12 @@ mod camera;
 mod home_assistant;
 mod sun;
 
+use std::fmt;
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
-use clap::{Parser, crate_version};
+use clap::{crate_version, Parser};
 use log::{debug, info, warn, LevelFilter};
 use reqwest::Url;
 use tokio::time;
@@ -31,23 +32,33 @@ struct Args {
     from_select: bool,
 
     /// Polling interval (in seconds)
-    #[arg(short = 'I', default_value = "30", display_order = 1)]
+    #[arg(short = 'I', long, default_value = "30", display_order = 1)]
     interval: u16,
 
     /// Event sent to HA when the camera turns on night vision
-    #[arg(short = 'N', default_value = "close_rollershutters", display_order = 2)]
+    #[arg(
+        short = 'N',
+        long,
+        default_value = "close_rollershutters",
+        display_order = 2
+    )]
     night_event: String,
 
     /// Event sent to HA when the camera turns off night vision
-    #[arg(short = 'D', default_value = "open_rollershutters", display_order = 2)]
+    #[arg(
+        short = 'D',
+        long,
+        default_value = "open_rollershutters",
+        display_order = 2
+    )]
     day_event: String,
 
     /// Base URL of HA
-    #[arg(short = 'U', default_value = "http://localhost:8123")]
+    #[arg(short = 'U', long, default_value = "http://localhost:8123")]
     url: Url,
 
     /// Access token for HA
-    #[arg(short = 'T', env = "TOKEN", hide_env_values = true)]
+    #[arg(short = 'T', long, env = "TOKEN", hide_env_values = true)]
     token: String,
 
     /// Entity
@@ -58,6 +69,15 @@ struct Args {
 pub enum Source {
     Camera(String),
     Select(String),
+}
+
+impl fmt::Display for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Camera(source) => write!(f, "{}", source),
+            Self::Select(source) => write!(f, "{}", source),
+        }
+    }
 }
 
 #[inline]
@@ -87,26 +107,23 @@ async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
         match camera.night_vision().await {
             Ok(_night_vision) => return Ok(()),
             Err(error) => {
-                use std::error::Error;
-                use std::io;
-
-                let io_error = error
-                    .downcast_ref::<reqwest::Error>()
-                    .and_then(|e| e.source())
-                    .and_then(|e| e.source())
-                    .and_then(|e| e.source())
-                    .and_then(|e| e.downcast_ref::<io::Error>())
-                    .map(|e| e.kind());
-
-                match io_error {
-                    Some(io::ErrorKind::ConnectionRefused) => {
+                if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
+                    if reqwest_error.is_connect() {
                         let secs = 2u64.pow(i);
-                        warn!("Home Assistant is not available. Retrying in {}s", secs);
+                        warn!("Home Assistant is not available. Retrying in {secs}s");
                         time::sleep(std::time::Duration::from_secs(secs)).await;
                         i += 1;
+                        continue;
+                    } else if let Some(reqwest::StatusCode::NOT_FOUND) = reqwest_error.status() {
+                        let secs = 2u64.pow(i);
+                        warn!("Camera '{camera}' is not available. Retrying in {secs}s");
+                        time::sleep(std::time::Duration::from_secs(secs)).await;
+                        i += 1;
+                        continue;
                     }
-                    _ => return Err(error),
                 }
+
+                return Err(error);
             }
         }
     }
@@ -139,16 +156,16 @@ async fn main() -> Result<()> {
             if let (&Some(Event::Sunset(_)), Event::Sunset(_))
             | (&Some(Event::Sunrise(_)), Event::Sunrise(_)) = (&last_event, event)
             {
-                debug!("{} was already handled!", event);
+                debug!("{event} was already handled!");
                 continue;
             }
 
             let event_in = until(event);
             let event_in_hours = event_in.num_minutes() as f32 / 60.0;
-            info!("Next {} in {:.1} hours", event, event_in_hours);
+            info!("Next {event} in {event_in_hours:.1} hours");
 
             if event_in.num_milliseconds() <= 0 {
-                warn!("The {} is in the past", event);
+                warn!("The {event} is in the past");
                 time::sleep(Duration::from_secs(5)).await;
                 continue 'main;
             }
@@ -157,7 +174,7 @@ async fn main() -> Result<()> {
                 time::sleep(sleep_for).await;
             }
 
-            info!("{} in {} min", event, until(event).num_minutes());
+            info!("{event} in {} min", until(event).num_minutes());
 
             let ha_event = 'wait_for_event: loop {
                 let night_vision = cam.night_vision().await?;

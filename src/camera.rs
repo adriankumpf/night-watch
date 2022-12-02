@@ -1,3 +1,5 @@
+use std::fmt;
+
 use anyhow::Result;
 use image::Pixel;
 use log::debug;
@@ -16,6 +18,12 @@ pub struct Camera<'a> {
     source: Source,
 }
 
+impl fmt::Display for Camera<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
 impl<'a> Camera<'a> {
     pub fn new(home_assistant: &'a HomeAssistant, source: Source) -> Self {
         Self {
@@ -27,7 +35,7 @@ impl<'a> Camera<'a> {
     pub async fn night_vision(&self) -> Result<bool> {
         let camera = match &self.source {
             Source::Select(select) => self.selected_camera(select).await?,
-            Source::Camera(camera) => camera.clone(), // TODO
+            Source::Camera(camera) => camera.clone(),
         };
 
         let image = self.home_assistant.get_camera_image(&camera).await?;
@@ -48,7 +56,7 @@ impl<'a> Camera<'a> {
         let f = (diff as f64) / (image.width() * image.height()) as f64 / (255.0 * 3.0);
         let night_vision = f < 0.005;
 
-        debug!("{}.night_vision={} ({:.8})", camera, night_vision, f);
+        debug!("{camera}.night_vision={night_vision} ({f:.8})");
 
         Ok(night_vision)
     }
@@ -56,7 +64,7 @@ impl<'a> Camera<'a> {
     async fn selected_camera(&self, select: &str) -> Result<String> {
         let select: Entity<Attributes, String> = self
             .home_assistant
-            .get_entity(&format!("input_select.{}", select))
+            .get_entity(&format!("input_select.{select}"))
             .await?;
 
         debug!("Select options: {:?}", select.attributes.options);

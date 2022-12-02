@@ -67,7 +67,7 @@ impl<'a> Sun<'a> {
             State::BelowHorizon => [sunrise, sunset],
         };
 
-        debug!("Next events: {:#?}", events);
+        debug!("Next events: {events:#?}");
 
         Ok(events)
     }
