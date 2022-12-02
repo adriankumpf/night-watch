@@ -38,9 +38,9 @@ impl<'a> Camera<'a> {
             let channels = p.channels();
             let (r, g, b) = (channels[0], channels[1], channels[2]);
 
-            let rg = ((r as i32) - (g as i32)).abs() as u32;
-            let rb = ((r as i32) - (b as i32)).abs() as u32;
-            let gb = ((g as i32) - (b as i32)).abs() as u32;
+            let rg = ((r as i32) - (g as i32)).unsigned_abs();
+            let rb = ((r as i32) - (b as i32)).unsigned_abs();
+            let gb = ((g as i32) - (b as i32)).unsigned_abs();
 
             diff += rg + rb + gb;
         }

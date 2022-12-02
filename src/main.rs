@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
-use clap::{crate_version, Parser};
+use clap::{Parser, crate_version};
 use log::{debug, info, warn, LevelFilter};
 use reqwest::Url;
 use tokio::time;
@@ -15,43 +15,43 @@ use camera::Camera;
 use home_assistant::HomeAssistant;
 use sun::{Event, Sun};
 
-#[derive(Parser, Clone, Debug)]
-#[clap(name = "night-watch", version = crate_version!())]
+#[derive(Parser, Debug)]
+#[command(version = crate_version!())]
 struct Args {
     /// Activates debug mode
-    #[clap(short, long)]
+    #[arg(short, long)]
     debug: bool,
 
     /// Tests the connection to HA and blocks until it is available
-    #[clap(short, long)]
+    #[arg(short, long)]
     test_connection: bool,
 
     /// Fetches the camera entity from an input_select element instead
-    #[clap(short = 's', long)]
+    #[arg(short = 's', long)]
     from_select: bool,
 
     /// Polling interval (in seconds)
-    #[clap(short = 'I', default_value = "30", display_order = 1)]
+    #[arg(short = 'I', default_value = "30", display_order = 1)]
     interval: u16,
 
     /// Event sent to HA when the camera turns on night vision
-    #[clap(short = 'N', default_value = "close_rollershutters", display_order = 2)]
+    #[arg(short = 'N', default_value = "close_rollershutters", display_order = 2)]
     night_event: String,
 
     /// Event sent to HA when the camera turns off night vision
-    #[clap(short = 'D', default_value = "open_rollershutters", display_order = 2)]
+    #[arg(short = 'D', default_value = "open_rollershutters", display_order = 2)]
     day_event: String,
 
     /// Base URL of HA
-    #[clap(short = 'U', default_value = "http://localhost:8123")]
+    #[arg(short = 'U', default_value = "http://localhost:8123")]
     url: Url,
 
     /// Access token for HA
-    #[clap(short = 'T', env = "TOKEN", hide_env_values = true)]
+    #[arg(short = 'T', env = "TOKEN", hide_env_values = true)]
     token: String,
 
     /// Entity
-    #[clap()]
+    #[arg()]
     entity: String,
 }
 
