@@ -1,37 +1,26 @@
 # night-watch
 
-A [Home Assistant](https://www.home-assistant.io/) extension to detect when an IP camera (de)activates its night vision.
+A utility to detect when an IP camera activates or deactivates its night vision mode using a [Home Assistant](https://www.home-assistant.io/) camera feed.
 
-## Background
-
-This application has been developed to automatically determine the optimal time to open/close roller shutters – depending on the lighting conditions.
+This application is designed to automatically determine the optimal time to open/close shutters based on lighting conditions.
 
 ## Usage
 
 ```man
-night-watch 0.1.0
+Usage: night-watch [OPTIONS] --token <TOKEN> <ENTITY>
 
-USAGE:
-    night-watch [FLAGS] [OPTIONS] <entity> -T <token>
+Arguments:
+  <ENTITY>  Entity
 
-FLAGS:
-    -d, --debug              Activates debug mode
-    -s, --from-select        Fetches the camera entity from an input_select element instead
-    -h, --help               Prints help information
-    -t, --test-connection    Tests the connection to HA and blocks until it is available
-    -V, --version            Prints version information
-
-OPTIONS:
-    -I <interval>           Polling interval (in seconds) [default: 30]
-    -D <day-event>          Event sent to HA when the camera turns off night vision [default: open_rollershutters]
-    -N <night-event>        Event sent to HA when the camera turns on night vision [default: close_rollershutters]
-    -T <token>              Access token for HA [env: TOKEN]
-    -U <url>                Base URL of HA [default: http://localhost:8123]
-
-ARGS:
-    <entity>    Entity
+Options:
+  -d, --debug                      Print debug logs
+  -I, --interval <INTERVAL>        Polling interval (in seconds) [default: 30]
+  -r, --retry                      Retry failed requests with increasing intervals between attempts (up to 2 minutes)
+  -D, --day-event <DAY_EVENT>      Event sent to HA when the camera turns off night vision [default: open_rollershutters]
+  -N, --night-event <NIGHT_EVENT>  Event sent to HA when the camera turns on night vision [default: close_rollershutters]
+  -s, --from-select                Fetches the camera entity from an input_select element instead
+  -U, --url <URL>                  Base URL of HA [default: http://localhost:8123]
+  -T, --token <TOKEN>              Access token for HA [env: TOKEN]
+  -h, --help                       Print help
+  -V, --version                    Print version
 ```
-
-## Requirements
-
-- Rust 1.39
