@@ -2,8 +2,8 @@ use std::fmt;
 
 use anyhow::Result;
 use image::Pixel;
-use log::debug;
 use serde::Deserialize;
+use tracing::debug;
 
 use crate::home_assistant::{Entity, HomeAssistant};
 use crate::Source;

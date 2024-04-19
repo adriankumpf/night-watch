@@ -1,7 +1,11 @@
 use anyhow::Result;
 use image::RgbImage;
 use reqwest::{header, Url};
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
+use retry_policies::Jitter;
 use serde::{de::DeserializeOwned, Deserialize};
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
@@ -16,21 +20,35 @@ pub struct EventResult {
 
 #[derive(Clone)]
 pub struct HomeAssistant {
-    client: reqwest::Client,
+    client: ClientWithMiddleware,
     base: Url,
 }
 
 impl HomeAssistant {
-    pub fn new(base: Url, token: &str) -> Result<Self> {
+    pub fn new(base: Url, token: &str, retry: bool) -> Result<Self> {
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
             header::HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()?;
+        let mut client = ClientBuilder::new(
+            reqwest::Client::builder()
+                .default_headers(headers)
+                .build()?,
+        );
+
+        if retry {
+            let retry_policy = ExponentialBackoff::builder()
+                .base(2)
+                .jitter(Jitter::None)
+                .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
+                .build_with_total_retry_duration_and_max_retries(Duration::from_secs(2 * 60));
+
+            client = client.with(RetryTransientMiddleware::new_with_policy(retry_policy));
+        };
+
+        let client = client.build();
 
         Ok(Self { client, base })
     }

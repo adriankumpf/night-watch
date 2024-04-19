@@ -2,15 +2,16 @@ mod camera;
 mod home_assistant;
 mod sun;
 
-use std::fmt;
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
 use clap::{crate_version, Parser};
-use log::{debug, info, warn, LevelFilter};
 use reqwest::Url;
 use tokio::time;
+use tracing::{debug, info, warn};
+use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+use tracing_subscriber::fmt;
 
 use camera::Camera;
 use home_assistant::HomeAssistant;
@@ -19,13 +20,13 @@ use sun::{Event, Sun};
 #[derive(Parser, Debug)]
 #[command(version = crate_version!())]
 struct Args {
-    /// Activates debug mode
+    /// Print debug logs
     #[arg(short, long)]
     debug: bool,
 
-    /// Tests the connection to HA and blocks until it is available
+    /// Retry failed requests with increasing intervals between attempts (up to 2 minutes)
     #[arg(short, long)]
-    test_connection: bool,
+    retry: bool,
 
     /// Fetches the camera entity from an input_select element instead
     #[arg(short = 's', long)]
@@ -71,8 +72,8 @@ pub enum Source {
     Select(String),
 }
 
-impl fmt::Display for Source {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Camera(source) => write!(f, "{}", source),
             Self::Select(source) => write!(f, "{}", source),
@@ -86,47 +87,22 @@ fn until(time: &DateTime<Utc>) -> chrono::Duration {
 }
 
 fn init_logger(debug: bool) {
-    env_logger::builder()
-        .format_timestamp(None)
-        .format_module_path(false)
-        .filter(
-            Some("night_watch"),
-            if debug {
-                LevelFilter::Debug
-            } else {
-                LevelFilter::Info
-            },
-        )
+    let format = fmt::format().without_time().with_target(false).compact();
+
+    let level = if debug {
+        LevelFilter::DEBUG
+    } else {
+        LevelFilter::INFO
+    };
+
+    let filter = EnvFilter::builder()
+        .with_default_directive(level.into())
+        .parse_lossy("");
+
+    tracing_subscriber::fmt()
+        .event_format(format)
+        .with_env_filter(filter)
         .init();
-}
-
-async fn wait_for_homeassistant(camera: &Camera<'_>) -> Result<()> {
-    let mut i = 0;
-
-    loop {
-        match camera.night_vision().await {
-            Ok(_night_vision) => return Ok(()),
-            Err(error) => {
-                if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
-                    if reqwest_error.is_connect() {
-                        let secs = 2u64.pow(i);
-                        warn!("Home Assistant is not available. Retrying in {secs}s");
-                        time::sleep(std::time::Duration::from_secs(secs)).await;
-                        i += 1;
-                        continue;
-                    } else if let Some(reqwest::StatusCode::NOT_FOUND) = reqwest_error.status() {
-                        let secs = 2u64.pow(i);
-                        warn!("Camera '{camera}' is not available. Retrying in {secs}s");
-                        time::sleep(std::time::Duration::from_secs(secs)).await;
-                        i += 1;
-                        continue;
-                    }
-                }
-
-                return Err(error);
-            }
-        }
-    }
 }
 
 #[tokio::main]
@@ -141,13 +117,9 @@ async fn main() -> Result<()> {
         Source::Camera(args.entity)
     };
 
-    let ha = HomeAssistant::new(args.url, &args.token)?;
+    let ha = HomeAssistant::new(args.url, &args.token, args.retry)?;
     let cam = Camera::new(&ha, source);
     let sun = Sun::new(&ha);
-
-    if args.test_connection {
-        wait_for_homeassistant(&cam).await?;
-    }
 
     let mut last_event = None;
 
@@ -170,7 +142,9 @@ async fn main() -> Result<()> {
                 continue 'main;
             }
 
-            if let Ok(sleep_for) = (event_in - chrono::Duration::minutes(45)).to_std() {
+            let fourtyfive_minutes = chrono::Duration::try_minutes(45).unwrap();
+
+            if let Ok(sleep_for) = (event_in - fourtyfive_minutes).to_std() {
                 time::sleep(sleep_for).await;
             }
 

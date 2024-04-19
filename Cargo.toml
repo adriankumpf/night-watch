@@ -5,18 +5,21 @@ authors = ["Adrian Kumpf"]
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.80"
-clap = { version = "4.5.1", features = ["derive", "env", "cargo"] }
-reqwest = { version = "0.11.24", default-features = false, features = ["json"] }
-tokio = { version = "1.36.0", default-features = false, features = [
+anyhow = "1.0.82"
+clap = { version = "4.5.4", features = ["derive", "env", "cargo"] }
+reqwest = { version = "0.12.4", default-features = false, features = ["json"] }
+reqwest-middleware = "0.3"
+reqwest-retry = "0.5"
+retry-policies = "0.3.0"
+tokio = { version = "1.37.0", default-features = false, features = [
   "macros",
   "rt-multi-thread",
 ] }
-serde = { version = "1.0.197", features = ["derive"] }
-chrono = { version = "0.4.34", features = ["serde"] }
-image = { version = "0.24.8", default-features = false, features = ["jpeg"] }
-env_logger = { version = "0.11.2", default-features = false }
-log = "0.4.20"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0.198", features = ["derive"] }
+chrono = { version = "0.4.38", features = ["serde"] }
+image = { version = "0.25.1", default-features = false, features = ["jpeg"] }
 
 [profile.release]
 lto = true

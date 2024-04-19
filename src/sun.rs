@@ -3,8 +3,8 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use chrono::{offset::Utc, DateTime};
-use log::debug;
 use serde::Deserialize;
+use tracing::debug;
 
 use crate::home_assistant::{Entity, HomeAssistant};
 
