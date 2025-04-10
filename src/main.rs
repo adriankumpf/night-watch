@@ -5,8 +5,8 @@ mod sun;
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{offset::Utc, DateTime};
-use clap::{crate_version, Parser};
+use chrono::{DateTime, offset::Utc};
+use clap::{Parser, crate_version};
 use reqwest::Url;
 use tokio::time;
 use tracing::{debug, info, warn};

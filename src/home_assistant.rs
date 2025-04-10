@@ -1,10 +1,10 @@
 use anyhow::Result;
 use image::RgbImage;
-use reqwest::{header, Url};
+use reqwest::{Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use retry_policies::Jitter;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 use std::time::Duration;
 
 #[derive(Debug, Deserialize)]

@@ -5,8 +5,8 @@ use image::Pixel;
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::home_assistant::{Entity, HomeAssistant};
 use crate::Source;
+use crate::home_assistant::{Entity, HomeAssistant};
 
 #[derive(Debug, Deserialize)]
 struct Attributes {

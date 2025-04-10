@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use anyhow::Result;
-use chrono::{offset::Utc, DateTime};
+use chrono::{DateTime, offset::Utc};
 use serde::Deserialize;
 use tracing::debug;
 
