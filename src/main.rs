@@ -75,8 +75,8 @@ pub enum Source {
 impl std::fmt::Display for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Camera(source) => write!(f, "{}", source),
-            Self::Select(source) => write!(f, "{}", source),
+            Self::Camera(source) => write!(f, "{source}"),
+            Self::Select(source) => write!(f, "{source}"),
         }
     }
 }

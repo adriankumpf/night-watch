@@ -3,7 +3,7 @@ use image::RgbImage;
 use reqwest::{Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use retry_policies::Jitter;
+use reqwest_retry::Jitter;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::time::Duration;
 
