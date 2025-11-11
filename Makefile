@@ -9,6 +9,3 @@ build: ## Build docker image with the release
 		-t adriankumpf/night-watch \
 		-t ghcr.io/adriankumpf/night-watch:latest \
 		.
-
-publish: ## Publish docker image to the GitHub Container Registry
-	@docker push ghcr.io/adriankumpf/night-watch:latest
