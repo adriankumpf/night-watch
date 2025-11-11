@@ -1,4 +1,4 @@
-FROM clux/muslrust:stable as builder
+FROM clux/muslrust:stable AS builder
 
 RUN useradd -u 10001 appuser
 
@@ -20,7 +20,7 @@ FROM scratch
 WORKDIR /app
 
 COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/night-watch .
+COPY --from=builder /app/target/*-linux-musl/release/night-watch .
 
 USER appuser
 
