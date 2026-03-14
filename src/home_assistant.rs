@@ -43,7 +43,7 @@ impl HomeAssistant {
                 .base(2)
                 .jitter(Jitter::None)
                 .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
-                .build_with_total_retry_duration_and_max_retries(Duration::from_secs(2 * 60));
+                .build_with_total_retry_duration_and_limit_retries(Duration::from_secs(2 * 60));
 
             client = client.with(RetryTransientMiddleware::new_with_policy(retry_policy));
         };
