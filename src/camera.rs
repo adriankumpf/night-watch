@@ -5,8 +5,8 @@ use tracing::debug;
 
 use crate::home_assistant::{Entity, HomeAssistant};
 
-/// Below this [`colour_spread`] the frame is effectively greyscale, i.e. the
-/// camera has switched to infrared.
+/// The [`colour_spread`] below which the frame is effectively greyscale, i.e.
+/// the camera has switched to infrared.
 const NIGHT_VISION_THRESHOLD: f64 = 0.005;
 
 /// Where the camera entity comes from.
@@ -76,8 +76,10 @@ impl<'a> Camera<'a> {
     }
 }
 
-/// The mean spread between a pixel's colour channels, normalised by the largest
-/// spread a single pixel can have. `0.0` for a perfectly greyscale image.
+/// The mean spread between a pixel's colour channels, as a fraction of
+/// `3 * 255`. `0.0` for a perfectly greyscale image, and at most `2/3`: the
+/// three differences telescope to twice the spread between the outermost
+/// channels, so a single pixel contributes at most `2 * 255`.
 fn colour_spread(image: &RgbImage) -> f64 {
     let diff: u64 = image
         .pixels()
@@ -99,9 +101,6 @@ mod tests {
     use super::*;
     use crate::test_support::{home_assistant, jpeg_response, json_response, solid};
 
-    /// The largest spread a single pixel can have: `|255-0| + |255-0| + |0-0|`.
-    const SATURATED: f64 = 510.0 / (255.0 * 3.0);
-
     #[test]
     fn a_grey_frame_has_no_colour_spread() {
         assert_eq!(colour_spread(&solid(8, 8, [17, 17, 17])), 0.0);
@@ -114,7 +113,10 @@ mod tests {
         let large = colour_spread(&solid(4000, 3000, [255, 0, 0]));
 
         assert_eq!(large, colour_spread(&solid(2, 2, [255, 0, 0])));
-        assert_eq!(large, SATURATED);
+
+        // A fully saturated pixel is worth 2 * 255 of the 3 * 255 it is
+        // divided by, so it pins the top of the scale.
+        assert_eq!(large, 2.0 / 3.0);
     }
 
     #[test]
