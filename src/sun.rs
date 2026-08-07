@@ -43,28 +43,19 @@ impl fmt::Display for Event {
     }
 }
 
-pub struct Sun<'a> {
-    home_assistant: &'a HomeAssistant,
-}
+/// The next sunset and sunrise, in the order they will occur.
+pub async fn next_events(home_assistant: &HomeAssistant) -> Result<[Event; 2]> {
+    let sun: Entity<Attributes, State> = home_assistant.get_entity("sun.sun").await?;
 
-impl<'a> Sun<'a> {
-    pub fn new(home_assistant: &'a HomeAssistant) -> Self {
-        Self { home_assistant }
-    }
+    let sunset = Event::Sunset(sun.attributes.next_setting);
+    let sunrise = Event::Sunrise(sun.attributes.next_rising);
 
-    pub async fn next_events(&self) -> Result<[Event; 2]> {
-        let sun: Entity<Attributes, State> = self.home_assistant.get_entity("sun.sun").await?;
+    let events = match sun.state {
+        State::AboveHorizon => [sunset, sunrise],
+        State::BelowHorizon => [sunrise, sunset],
+    };
 
-        let sunset = Event::Sunset(sun.attributes.next_setting);
-        let sunrise = Event::Sunrise(sun.attributes.next_rising);
+    debug!("Next events: {events:#?}");
 
-        let events = match sun.state {
-            State::AboveHorizon => [sunset, sunrise],
-            State::BelowHorizon => [sunrise, sunset],
-        };
-
-        debug!("Next events: {events:#?}");
-
-        Ok(events)
-    }
+    Ok(events)
 }

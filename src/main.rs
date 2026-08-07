@@ -15,7 +15,7 @@ use tracing_subscriber::fmt;
 
 use camera::Camera;
 use home_assistant::HomeAssistant;
-use sun::{Event, Sun};
+use sun::Event;
 
 #[derive(Parser, Debug)]
 #[command(version = crate_version!())]
@@ -118,12 +118,11 @@ async fn main() -> Result<()> {
 
     let ha = HomeAssistant::new(args.url, &args.token, args.retry)?;
     let cam = Camera::new(&ha, source);
-    let sun = Sun::new(&ha);
 
     let mut last_event = None;
 
     'main: loop {
-        for event in &sun.next_events().await? {
+        for event in &sun::next_events(&ha).await? {
             if let (&Some(Event::Sunset(_)), Event::Sunset(_))
             | (&Some(Event::Sunrise(_)), Event::Sunrise(_)) = (&last_event, event)
             {
