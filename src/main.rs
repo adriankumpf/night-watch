@@ -81,9 +81,8 @@ impl std::fmt::Display for Source {
     }
 }
 
-#[inline]
-fn until(time: &DateTime<Utc>) -> chrono::Duration {
-    *time - Utc::now()
+fn until(time: DateTime<Utc>) -> chrono::TimeDelta {
+    time - Utc::now()
 }
 
 fn init_logger(debug: bool) {
@@ -132,7 +131,7 @@ async fn main() -> Result<()> {
                 continue;
             }
 
-            let event_in = until(event);
+            let event_in = until(event.at());
             let event_in_hours = event_in.num_minutes() as f32 / 60.0;
             info!("Next {event} in {event_in_hours:.1} hours");
 
@@ -148,7 +147,7 @@ async fn main() -> Result<()> {
                 time::sleep(sleep_for).await;
             }
 
-            info!("{event} in {} min", until(event).num_minutes());
+            info!("{event} in {} min", until(event.at()).num_minutes());
 
             let ha_event = 'wait_for_event: loop {
                 let night_vision = cam.night_vision().await?;
@@ -166,11 +165,11 @@ async fn main() -> Result<()> {
             };
 
             let result = ha.send_event(ha_event).await?;
-            let diff = -until(event).num_minutes();
+            let diff = -until(event.at()).num_minutes();
 
             info!("{} [{:+}]", result.message, diff);
 
-            last_event = Some(event.clone());
+            last_event = Some(*event);
         }
     }
 }

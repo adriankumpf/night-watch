@@ -1,5 +1,4 @@
 use std::fmt;
-use std::ops::Deref;
 
 use anyhow::Result;
 use chrono::{DateTime, offset::Utc};
@@ -17,33 +16,30 @@ enum State {
 
 #[derive(Debug, Deserialize)]
 struct Attributes {
-    pub next_rising: DateTime<Utc>,
-    pub next_setting: DateTime<Utc>,
+    next_rising: DateTime<Utc>,
+    next_setting: DateTime<Utc>,
 }
 
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Event {
     Sunset(DateTime<Utc>),
     Sunrise(DateTime<Utc>),
 }
 
-impl Deref for Event {
-    type Target = DateTime<Utc>;
-
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            Event::Sunset(ref dt) => dt,
-            Event::Sunrise(ref dt) => dt,
-        }
+impl Event {
+    /// The time this event occurs at.
+    pub const fn at(self) -> DateTime<Utc> {
+        let (Self::Sunset(at) | Self::Sunrise(at)) = self;
+        at
     }
 }
 
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Event::Sunset(_) => write!(f, "Sunset"),
-            Event::Sunrise(_) => write!(f, "Sunrise"),
-        }
+        f.write_str(match self {
+            Self::Sunset(_) => "Sunset",
+            Self::Sunrise(_) => "Sunrise",
+        })
     }
 }
 
