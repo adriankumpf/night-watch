@@ -1,17 +1,32 @@
-use std::fmt;
-
 use anyhow::Result;
 use image::Rgb;
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::Source;
 use crate::home_assistant::{Entity, HomeAssistant};
 
 /// Mean spread between a pixel's colour channels, normalised to `0.0..=1.0`.
 /// Below this the frame is effectively greyscale, i.e. the camera has switched
 /// to infrared.
 const NIGHT_VISION_THRESHOLD: f64 = 0.005;
+
+/// Where the camera entity comes from.
+pub enum Source {
+    /// The camera entity itself.
+    Camera(String),
+    /// An `input_select` whose selected option names the camera entity.
+    Select(String),
+}
+
+impl Source {
+    pub fn new(entity: String, from_select: bool) -> Self {
+        if from_select {
+            Self::Select(entity)
+        } else {
+            Self::Camera(entity)
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Attributes {
@@ -21,12 +36,6 @@ struct Attributes {
 pub struct Camera<'a> {
     home_assistant: &'a HomeAssistant,
     source: Source,
-}
-
-impl fmt::Display for Camera<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.source)
-    }
 }
 
 impl<'a> Camera<'a> {

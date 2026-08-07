@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 use tracing_subscriber::fmt;
 
-use camera::Camera;
+use camera::{Camera, Source};
 use home_assistant::HomeAssistant;
 use sun::Event;
 
@@ -67,20 +67,6 @@ struct Args {
     entity: String,
 }
 
-pub enum Source {
-    Camera(String),
-    Select(String),
-}
-
-impl std::fmt::Display for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Camera(source) => write!(f, "{source}"),
-            Self::Select(source) => write!(f, "{source}"),
-        }
-    }
-}
-
 fn until(time: DateTime<Utc>) -> chrono::TimeDelta {
     time - Utc::now()
 }
@@ -110,14 +96,8 @@ async fn main() -> Result<()> {
 
     init_logger(args.debug);
 
-    let source = if args.from_select {
-        Source::Select(args.entity)
-    } else {
-        Source::Camera(args.entity)
-    };
-
     let ha = HomeAssistant::new(args.url, &args.token, args.retry)?;
-    let cam = Camera::new(&ha, source);
+    let cam = Camera::new(&ha, Source::new(args.entity, args.from_select));
 
     let mut last_event = None;
 
