@@ -86,7 +86,7 @@ impl HomeAssistant {
             .bytes()
             .await?;
 
-        let image = image::load_from_memory(&bytes)?.to_rgb8();
+        let image = image::load_from_memory(&bytes)?.into_rgb8();
 
         Ok(image)
     }
