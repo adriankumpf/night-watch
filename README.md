@@ -24,3 +24,40 @@ Options:
   -h, --help                       Print help
   -V, --version                    Print version
 ```
+
+## Deployment
+
+Multi-arch images (`linux/amd64` and `linux/arm64`) are published to
+`ghcr.io/adriankumpf/night-watch:latest`.
+
+```yaml
+services:
+  night-watch:
+    image: ghcr.io/adriankumpf/night-watch:latest
+    command: ["--url", "http://192.168.1.42:8123", "camera.driveway"]
+    environment:
+      TOKEN: ${TOKEN}
+    restart: unless-stopped
+```
+
+### Addressing Home Assistant
+
+Use an IP address or a regular DNS name for `--url`. **`homeassistant.local`
+will not resolve**, and fails with `dns error: failed to lookup address
+information`.
+
+The binary is statically linked against musl, and musl implements no NSS. It
+resolves via `/etc/hosts` and plain DNS from `/etc/resolv.conf` only, so mDNS
+(`.local`) is unavailable no matter how the host is configured. If you would
+rather keep the hostname, map it yourself -- Docker mounts `/etc/hosts` into the
+container, and musl does read it:
+
+```yaml
+    extra_hosts:
+      - "homeassistant.local:192.168.1.42"
+```
+
+Note also that `reqwest` is built without a TLS backend, so `--url` must be
+`http://`. This keeps the runtime image at ~2 MB (it is built `FROM scratch`),
+and is fine for talking to Home Assistant across a trusted LAN. Anything routed
+over an untrusted network wants a TLS-terminating proxy in front.
