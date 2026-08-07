@@ -24,7 +24,16 @@ pub struct HomeAssistant {
 }
 
 impl HomeAssistant {
-    pub fn new(base: Url, token: &str, retry: bool) -> Result<Self> {
+    pub fn new(mut base: Url, token: &str, retry: bool) -> Result<Self> {
+        if base.cannot_be_a_base() {
+            return Err(anyhow!("{base} cannot be a base URL"));
+        }
+
+        // Drop a trailing empty segment once, so that `url` is a plain append.
+        base.path_segments_mut()
+            .expect("checked just above")
+            .pop_if_empty();
+
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -54,22 +63,22 @@ impl HomeAssistant {
     }
 
     /// The base URL with `segments` appended to whatever path it already has,
-    /// so a HA behind a reverse proxy at a sub-path keeps working.
-    fn url(&self, segments: &[&str]) -> Result<Url> {
+    /// so a HA behind a reverse proxy at a sub-path keeps working. Each segment
+    /// is escaped, so an entity id can never escape the API path.
+    fn url(&self, segments: &[&str]) -> Url {
         let mut url = self.base.clone();
 
         url.path_segments_mut()
-            .map_err(|()| anyhow!("{} cannot be a base URL", self.base))?
-            .pop_if_empty()
+            .expect("`new` rejects a base URL that cannot be one")
             .extend(segments);
 
-        Ok(url)
+        url
     }
 
     async fn request(&self, method: Method, segments: &[&str]) -> Result<Response> {
         let response = self
             .client
-            .request(method, self.url(segments)?)
+            .request(method, self.url(segments))
             .send()
             .await?
             .error_for_status()?;
@@ -125,13 +134,13 @@ mod tests {
         let states = ["api", "states", "sun.sun"];
 
         for base in ["http://ha.local:8123", "http://ha.local:8123/"] {
-            let url = client(base, false).url(&states).unwrap();
+            let url = client(base, false).url(&states);
             assert_eq!(url.as_str(), "http://ha.local:8123/api/states/sun.sun");
         }
 
         // A HA served under a sub-path by a reverse proxy.
         for base in ["https://home.example/hass", "https://home.example/hass/"] {
-            let url = client(base, false).url(&states).unwrap();
+            let url = client(base, false).url(&states);
             assert_eq!(url.as_str(), "https://home.example/hass/api/states/sun.sun");
         }
     }
@@ -140,17 +149,16 @@ mod tests {
     fn entity_ids_cannot_escape_the_api_path() {
         let url = client("http://ha.local", false).url(&["api", "states", "../../evil"]);
 
-        assert_eq!(
-            url.unwrap().as_str(),
-            "http://ha.local/api/states/..%2F..%2Fevil"
-        );
+        assert_eq!(url.as_str(), "http://ha.local/api/states/..%2F..%2Fevil");
     }
 
     #[test]
-    fn a_url_without_a_path_is_rejected() {
-        let error = client("mailto:ha@example.com", false)
-            .url(&["api", "states", "sun.sun"])
-            .unwrap_err();
+    fn a_url_that_cannot_be_a_base_is_rejected() {
+        let base = "mailto:ha@example.com".parse().unwrap();
+
+        let Err(error) = HomeAssistant::new(base, TOKEN, false) else {
+            panic!("a mailto: URL cannot be a base and must be rejected");
+        };
 
         assert!(
             error.to_string().contains("cannot be a base URL"),
