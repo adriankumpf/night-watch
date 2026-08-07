@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use image::RgbImage;
 use reqwest::{Method, Response, Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -53,12 +53,23 @@ impl HomeAssistant {
         })
     }
 
-    async fn request(&self, method: Method, path: &str) -> Result<Response> {
-        let url = self.base.join(path)?;
+    /// The base URL with `segments` appended to whatever path it already has,
+    /// so a HA behind a reverse proxy at a sub-path keeps working.
+    fn url(&self, segments: &[&str]) -> Result<Url> {
+        let mut url = self.base.clone();
 
+        url.path_segments_mut()
+            .map_err(|()| anyhow!("{} cannot be a base URL", self.base))?
+            .pop_if_empty()
+            .extend(segments);
+
+        Ok(url)
+    }
+
+    async fn request(&self, method: Method, segments: &[&str]) -> Result<Response> {
         let response = self
             .client
-            .request(method, url)
+            .request(method, self.url(segments)?)
             .send()
             .await?
             .error_for_status()?;
@@ -71,22 +82,27 @@ impl HomeAssistant {
         S: DeserializeOwned,
         T: DeserializeOwned,
     {
-        let path = format!("/api/states/{entity}");
+        let response = self
+            .request(Method::GET, &["api", "states", entity])
+            .await?;
 
-        Ok(self.request(Method::GET, &path).await?.json().await?)
+        Ok(response.json().await?)
     }
 
     pub async fn get_camera_image(&self, entity: &str) -> Result<RgbImage> {
-        let path = format!("/api/camera_proxy/{entity}");
-        let bytes = self.request(Method::GET, &path).await?.bytes().await?;
+        let response = self
+            .request(Method::GET, &["api", "camera_proxy", entity])
+            .await?;
 
-        Ok(image::load_from_memory(&bytes)?.into_rgb8())
+        Ok(image::load_from_memory(&response.bytes().await?)?.into_rgb8())
     }
 
     pub async fn send_event(&self, event: &str) -> Result<EventResult> {
-        let path = format!("/api/events/{event}");
+        let response = self
+            .request(Method::POST, &["api", "events", event])
+            .await?;
 
-        Ok(self.request(Method::POST, &path).await?.json().await?)
+        Ok(response.json().await?)
     }
 }
 
@@ -102,6 +118,48 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct Attributes {
         friendly_name: String,
+    }
+
+    fn client(base: &str) -> HomeAssistant {
+        HomeAssistant::new(base.parse().unwrap(), TOKEN, false).unwrap()
+    }
+
+    #[test]
+    fn paths_are_appended_to_the_base_url() {
+        let states = ["api", "states", "sun.sun"];
+
+        for base in ["http://ha.local:8123", "http://ha.local:8123/"] {
+            let url = client(base).url(&states).unwrap();
+            assert_eq!(url.as_str(), "http://ha.local:8123/api/states/sun.sun");
+        }
+
+        // A HA served under a sub-path by a reverse proxy.
+        for base in ["https://home.example/hass", "https://home.example/hass/"] {
+            let url = client(base).url(&states).unwrap();
+            assert_eq!(url.as_str(), "https://home.example/hass/api/states/sun.sun");
+        }
+    }
+
+    #[test]
+    fn entity_ids_cannot_escape_the_api_path() {
+        let url = client("http://ha.local").url(&["api", "states", "../../evil"]);
+
+        assert_eq!(
+            url.unwrap().as_str(),
+            "http://ha.local/api/states/..%2F..%2Fevil"
+        );
+    }
+
+    #[test]
+    fn a_url_without_a_path_is_rejected() {
+        let error = client("mailto:ha@example.com")
+            .url(&["api", "states", "sun.sun"])
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("cannot be a base URL"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
