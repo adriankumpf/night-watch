@@ -1,4 +1,4 @@
-.PHONY: help build publish
+.PHONY: help build
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
 	sort | \

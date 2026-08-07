@@ -8,7 +8,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src src
 
 RUN cargo build --release --locked && \
-    cp target/*-linux-musl/release/night-watch /night-watch
+    cp "target/$CARGO_BUILD_TARGET/release/night-watch" /night-watch
 
 ##########################################################
 
