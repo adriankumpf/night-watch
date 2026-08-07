@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 
 use anyhow::Result;
 use chrono::{DateTime, offset::Utc};
@@ -31,6 +32,11 @@ impl Event {
     pub const fn at(self) -> DateTime<Utc> {
         let (Self::Sunset(at) | Self::Sunrise(at)) = self;
         at
+    }
+
+    /// Whether both events are sunrises or both are sunsets, ignoring their times.
+    pub fn same_kind(self, other: Self) -> bool {
+        mem::discriminant(&self) == mem::discriminant(&other)
     }
 }
 
