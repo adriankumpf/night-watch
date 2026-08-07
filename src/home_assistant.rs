@@ -113,15 +113,11 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::test_support::{TOKEN, home_assistant, jpeg, solid};
+    use crate::test_support::{TOKEN, client, home_assistant, jpeg_response, json_response, solid};
 
     #[derive(Debug, Deserialize)]
     struct Attributes {
         friendly_name: String,
-    }
-
-    fn client(base: &str) -> HomeAssistant {
-        HomeAssistant::new(base.parse().unwrap(), TOKEN, false).unwrap()
     }
 
     #[test]
@@ -129,20 +125,20 @@ mod tests {
         let states = ["api", "states", "sun.sun"];
 
         for base in ["http://ha.local:8123", "http://ha.local:8123/"] {
-            let url = client(base).url(&states).unwrap();
+            let url = client(base, false).url(&states).unwrap();
             assert_eq!(url.as_str(), "http://ha.local:8123/api/states/sun.sun");
         }
 
         // A HA served under a sub-path by a reverse proxy.
         for base in ["https://home.example/hass", "https://home.example/hass/"] {
-            let url = client(base).url(&states).unwrap();
+            let url = client(base, false).url(&states).unwrap();
             assert_eq!(url.as_str(), "https://home.example/hass/api/states/sun.sun");
         }
     }
 
     #[test]
     fn entity_ids_cannot_escape_the_api_path() {
-        let url = client("http://ha.local").url(&["api", "states", "../../evil"]);
+        let url = client("http://ha.local", false).url(&["api", "states", "../../evil"]);
 
         assert_eq!(
             url.unwrap().as_str(),
@@ -152,7 +148,7 @@ mod tests {
 
     #[test]
     fn a_url_without_a_path_is_rejected() {
-        let error = client("mailto:ha@example.com")
+        let error = client("mailto:ha@example.com", false)
             .url(&["api", "states", "sun.sun"])
             .unwrap_err();
 
@@ -169,9 +165,8 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/api/states/binary_sensor.door"))
             .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
+            .respond_with(json_response(
                 r#"{"state": "on", "attributes": {"friendly_name": "Door"}}"#,
-                "application/json",
             ))
             .expect(1)
             .mount(&server)
@@ -192,9 +187,8 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/events/close_rollershutters"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
+            .respond_with(json_response(
                 r#"{"message": "Event close_rollershutters fired."}"#,
-                "application/json",
             ))
             .expect(1)
             .mount(&server)
@@ -214,10 +208,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/camera_proxy/camera.front_door"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(jpeg(solid(32, 16, [10, 20, 30])), "image/jpeg"),
-            )
+            .respond_with(jpeg_response(&solid(32, 16, [10, 20, 30])))
             .mount(&server)
             .await;
 
@@ -278,15 +269,12 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(r#"{"message": "Event fired."}"#, "application/json"),
-            )
+            .respond_with(json_response(r#"{"message": "Event fired."}"#))
             .expect(1)
             .mount(&server)
             .await;
 
-        let ha = HomeAssistant::new(server.uri().parse().unwrap(), TOKEN, true).unwrap();
+        let ha = client(&server.uri(), true);
         let result = ha.send_event("open_rollershutters").await.unwrap();
 
         assert_eq!(result.message, "Event fired.");

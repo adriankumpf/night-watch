@@ -69,10 +69,23 @@ pub async fn next_events(home_assistant: &HomeAssistant) -> Result<[Event; 2]> {
 #[cfg(test)]
 mod tests {
     use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Mock, MockServer};
 
     use super::*;
-    use crate::test_support::home_assistant;
+    use crate::test_support::{home_assistant, json_response};
+
+    /// The attributes HA reports on `sun.sun`; only the next rising and setting
+    /// are read, the rest are here to keep the payload realistic.
+    const ATTRIBUTES: &str = r#"{
+        "next_dawn": "2024-04-20T04:42:11.101010+00:00",
+        "next_dusk": "2024-04-20T19:41:33.404040+00:00",
+        "next_midnight": "2024-04-21T00:11:52.505050+00:00",
+        "next_noon": "2024-04-20T12:11:41.606060+00:00",
+        "next_rising": "2024-04-20T05:19:28.202020+00:00",
+        "next_setting": "2024-04-20T19:04:16.303030+00:00",
+        "elevation": 34.19,
+        "friendly_name": "Sun"
+    }"#;
 
     fn at(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339).unwrap().to_utc()
@@ -84,26 +97,9 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/states/sun.sun"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                format!(
-                    r#"{{
-                         "entity_id": "sun.sun",
-                         "state": "{state}",
-                         "attributes": {{
-                           "next_dawn": "2024-04-20T04:42:11.101010+00:00",
-                           "next_dusk": "2024-04-20T19:41:33.404040+00:00",
-                           "next_midnight": "2024-04-21T00:11:52.505050+00:00",
-                           "next_noon": "2024-04-20T12:11:41.606060+00:00",
-                           "next_rising": "2024-04-20T05:19:28.202020+00:00",
-                           "next_setting": "2024-04-20T19:04:16.303030+00:00",
-                           "elevation": 34.19,
-                           "friendly_name": "Sun"
-                         }},
-                         "last_changed": "2024-04-20T05:19:28.202020+00:00"
-                       }}"#
-                ),
-                "application/json",
-            ))
+            .respond_with(json_response(format!(
+                r#"{{"state": "{state}", "attributes": {ATTRIBUTES}}}"#
+            )))
             .mount(&server)
             .await;
 

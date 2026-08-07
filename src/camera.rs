@@ -94,17 +94,13 @@ fn colour_spread(image: &RgbImage) -> f64 {
 #[cfg(test)]
 mod tests {
     use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Mock, MockServer};
 
     use super::*;
-    use crate::test_support::{home_assistant, jpeg, solid};
+    use crate::test_support::{home_assistant, jpeg_response, json_response, solid};
 
     /// The largest spread a single pixel can have: `|255-0| + |255-0| + |0-0|`.
     const SATURATED: f64 = 510.0 / (255.0 * 3.0);
-
-    fn jpeg_response(image: RgbImage) -> ResponseTemplate {
-        ResponseTemplate::new(200).set_body_raw(jpeg(image), "image/jpeg")
-    }
 
     #[test]
     fn a_grey_frame_has_no_colour_spread() {
@@ -146,7 +142,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/camera_proxy/camera.front_door"))
-            .respond_with(jpeg_response(solid(64, 64, [40, 40, 40])))
+            .respond_with(jpeg_response(&solid(64, 64, [40, 40, 40])))
             .expect(1)
             .mount(&server)
             .await;
@@ -163,18 +159,8 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/states/input_select.cameras"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{
-                     "entity_id": "input_select.cameras",
-                     "state": "Front_Door",
-                     "attributes": {
-                       "options": ["Front_Door", "Garden"],
-                       "editable": true,
-                       "friendly_name": "Cameras"
-                     },
-                     "last_changed": "2024-04-20T18:09:00.000000+00:00"
-                   }"#,
-                "application/json",
+            .respond_with(json_response(
+                r#"{"state": "Front_Door", "attributes": {"options": ["Front_Door", "Garden"]}}"#,
             ))
             .expect(1)
             .mount(&server)
@@ -183,7 +169,7 @@ mod tests {
         // The selected option names the camera, lowercased and prefixed.
         Mock::given(method("GET"))
             .and(path("/api/camera_proxy/camera.front_door"))
-            .respond_with(jpeg_response(solid(64, 64, [200, 30, 30])))
+            .respond_with(jpeg_response(&solid(64, 64, [200, 30, 30])))
             .expect(1)
             .mount(&server)
             .await;
