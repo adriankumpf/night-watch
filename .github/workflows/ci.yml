@@ -19,8 +19,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
+  check:
+    name: Check
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -32,53 +32,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
 
+      # Cheapest first, so a formatting slip reports without waiting for a build.
+      - run: cargo fmt --all --check
+
+      # Order matters: the dev-profile artifacts `cargo test` leaves behind
+      # satisfy clippy's check-profile fingerprints, so clippy only has to lint
+      # this crate rather than rebuild the dependency graph.
       - run: cargo test --locked
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy
-
-      - uses: Swatinem/rust-cache@v2
-
       - run: cargo clippy --locked --all-targets -- -D warnings
-
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt
-
-      - run: cargo fmt --all --check
 
   publish_image:
     name: Publish image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    needs: [test, clippy, fmt]
-    if: github.event_name == 'push'
+    needs: [check]
+    if: github.ref == 'refs/heads/master'
 
     permissions:
       contents: read
