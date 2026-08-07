@@ -43,7 +43,10 @@ impl<'a> Camera<'a> {
             Source::Camera(camera) => camera.clone(),
         };
 
-        let image = self.home_assistant.get_camera_image(&camera).await?;
+        let image = self
+            .home_assistant
+            .get_camera_image(&format!("camera.{camera}"))
+            .await?;
 
         let diff: u64 = image
             .pixels()

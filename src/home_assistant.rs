@@ -1,6 +1,6 @@
 use anyhow::Result;
 use image::RgbImage;
-use reqwest::{Url, header};
+use reqwest::{Method, Response, Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use reqwest_retry::Jitter;
@@ -53,56 +53,39 @@ impl HomeAssistant {
         Ok(Self { client, base })
     }
 
+    async fn request(&self, method: Method, path: &str) -> Result<Response> {
+        let url = self.base.join(path)?;
+
+        let response = self
+            .client
+            .request(method, url)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(response)
+    }
+
     pub async fn get_entity<T, S>(&self, entity: &str) -> Result<Entity<T, S>>
     where
         S: DeserializeOwned,
         T: DeserializeOwned,
     {
-        let url = self.base.join(&format!("/api/states/{entity}"))?;
+        let path = format!("/api/states/{entity}");
 
-        let state = self
-            .client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        Ok(state)
+        Ok(self.request(Method::GET, &path).await?.json().await?)
     }
 
-    pub async fn get_camera_image(&self, camera: &str) -> Result<RgbImage> {
-        let url = self
-            .base
-            .join(&format!("/api/camera_proxy/camera.{camera}"))?;
+    pub async fn get_camera_image(&self, entity: &str) -> Result<RgbImage> {
+        let path = format!("/api/camera_proxy/{entity}");
+        let bytes = self.request(Method::GET, &path).await?.bytes().await?;
 
-        let bytes = self
-            .client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
-
-        let image = image::load_from_memory(&bytes)?.into_rgb8();
-
-        Ok(image)
+        Ok(image::load_from_memory(&bytes)?.into_rgb8())
     }
 
     pub async fn send_event(&self, event: &str) -> Result<EventResult> {
-        let url = self.base.join(&format!("/api/events/{event}"))?;
+        let path = format!("/api/events/{event}");
 
-        let result = self
-            .client
-            .post(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        Ok(result)
+        Ok(self.request(Method::POST, &path).await?.json().await?)
     }
 }
