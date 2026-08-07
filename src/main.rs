@@ -1,6 +1,8 @@
 mod camera;
 mod home_assistant;
 mod sun;
+#[cfg(test)]
+mod test_support;
 
 use std::time::Duration;
 
@@ -146,5 +148,40 @@ async fn main() -> Result<()> {
 
             last_event = Some(event);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    use super::*;
+
+    #[test]
+    fn no_arguments_conflict() {
+        Args::command().debug_assert();
+    }
+
+    #[test]
+    fn unset_arguments_fall_back_to_their_defaults() {
+        let args =
+            Args::try_parse_from(["night-watch", "--token", "s3cr3t", "front_door"]).unwrap();
+
+        assert_eq!(args.entity, "front_door");
+        assert_eq!(args.url.as_str(), "http://localhost:8123/");
+        assert_eq!(args.interval, 30);
+        assert_eq!(args.day_event, "open_rollershutters");
+        assert_eq!(args.night_event, "close_rollershutters");
+        assert!(!args.debug && !args.retry && !args.from_select);
+    }
+
+    #[test]
+    fn the_entity_is_required() {
+        assert!(Args::try_parse_from(["night-watch", "--token", "s3cr3t"]).is_err());
+    }
+
+    #[test]
+    fn an_invalid_url_is_rejected() {
+        assert!(Args::try_parse_from(["night-watch", "-T", "t", "-U", "localhost", "e"]).is_err());
     }
 }

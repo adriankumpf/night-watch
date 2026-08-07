@@ -1,13 +1,61 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches:
       - "master"
 
+# Superseded pull request runs are pointless; master runs are not, since each
+# one publishes an image.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  publish_image:
+  check:
+    name: Check
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cheapest first, so a formatting slip reports without waiting for a build.
+      - run: cargo fmt --all --check
+
+      # Order matters: the dev-profile artifacts `cargo test` leaves behind
+      # satisfy clippy's check-profile fingerprints, so clippy only has to lint
+      # this crate rather than rebuild the dependency graph.
+      - run: cargo test --locked
+
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  publish_image:
+    name: Publish image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [check]
+    if: github.ref == 'refs/heads/master'
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Set up Docker Buildx
@@ -38,4 +86,6 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
       - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo "$DIGEST"
+        env:
+          DIGEST: ${{ steps.docker_build.outputs.digest }}
