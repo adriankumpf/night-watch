@@ -91,27 +91,29 @@ impl HomeAssistant {
         S: DeserializeOwned,
         T: DeserializeOwned,
     {
-        let response = self
+        Ok(self
             .request(Method::GET, &["api", "states", entity])
-            .await?;
-
-        Ok(response.json().await?)
+            .await?
+            .json()
+            .await?)
     }
 
     pub async fn get_camera_image(&self, entity: &str) -> Result<RgbImage> {
-        let response = self
+        let bytes = self
             .request(Method::GET, &["api", "camera_proxy", entity])
+            .await?
+            .bytes()
             .await?;
 
-        Ok(image::load_from_memory(&response.bytes().await?)?.into_rgb8())
+        Ok(image::load_from_memory(&bytes)?.into_rgb8())
     }
 
     pub async fn send_event(&self, event: &str) -> Result<EventResult> {
-        let response = self
+        Ok(self
             .request(Method::POST, &["api", "events", event])
-            .await?;
-
-        Ok(response.json().await?)
+            .await?
+            .json()
+            .await?)
     }
 }
 
