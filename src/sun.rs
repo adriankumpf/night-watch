@@ -65,3 +65,88 @@ pub async fn next_events(home_assistant: &HomeAssistant) -> Result<[Event; 2]> {
 
     Ok(events)
 }
+
+#[cfg(test)]
+mod tests {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::test_support::home_assistant;
+
+    fn at(rfc3339: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(rfc3339).unwrap().to_utc()
+    }
+
+    /// A `sun.sun` state as HA serves it, with the sun currently `state`.
+    async fn serve_sun(state: &str) -> MockServer {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/states/sun.sun"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                format!(
+                    r#"{{
+                         "entity_id": "sun.sun",
+                         "state": "{state}",
+                         "attributes": {{
+                           "next_dawn": "2024-04-20T04:42:11.101010+00:00",
+                           "next_dusk": "2024-04-20T19:41:33.404040+00:00",
+                           "next_midnight": "2024-04-21T00:11:52.505050+00:00",
+                           "next_noon": "2024-04-20T12:11:41.606060+00:00",
+                           "next_rising": "2024-04-20T05:19:28.202020+00:00",
+                           "next_setting": "2024-04-20T19:04:16.303030+00:00",
+                           "elevation": 34.19,
+                           "friendly_name": "Sun"
+                         }},
+                         "last_changed": "2024-04-20T05:19:28.202020+00:00"
+                       }}"#
+                ),
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+
+        server
+    }
+
+    #[test]
+    fn events_of_the_same_kind_are_equivalent_regardless_of_time() {
+        let sunset = Event::Sunset(at("2024-04-20T19:04:16Z"));
+        let later = Event::Sunset(at("2024-04-21T19:05:44Z"));
+        let sunrise = Event::Sunrise(at("2024-04-20T05:19:28Z"));
+
+        assert!(sunset.same_kind(later));
+        assert!(!sunset.same_kind(sunrise));
+    }
+
+    #[test]
+    fn events_are_displayed_by_kind() {
+        let now = Utc::now();
+
+        assert_eq!(Event::Sunset(now).to_string(), "Sunset");
+        assert_eq!(Event::Sunrise(now).to_string(), "Sunrise");
+    }
+
+    #[tokio::test]
+    async fn the_sunset_comes_first_while_the_sun_is_up() {
+        let server = serve_sun("above_horizon").await;
+
+        let [first, second] = next_events(&home_assistant(&server)).await.unwrap();
+
+        assert!(matches!(first, Event::Sunset(_)));
+        assert_eq!(first.at(), at("2024-04-20T19:04:16.303030+00:00"));
+        assert!(matches!(second, Event::Sunrise(_)));
+        assert_eq!(second.at(), at("2024-04-20T05:19:28.202020+00:00"));
+    }
+
+    #[tokio::test]
+    async fn the_sunrise_comes_first_while_the_sun_is_down() {
+        let server = serve_sun("below_horizon").await;
+
+        let [first, second] = next_events(&home_assistant(&server)).await.unwrap();
+
+        assert!(matches!(first, Event::Sunrise(_)));
+        assert!(matches!(second, Event::Sunset(_)));
+    }
+}
