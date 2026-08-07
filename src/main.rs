@@ -157,18 +157,15 @@ mod tests {
 
     use super::*;
 
-    fn parse(args: &[&str]) -> Args {
-        Args::try_parse_from([&["night-watch", "--token", "s3cr3t"], args].concat()).unwrap()
-    }
-
     #[test]
     fn no_arguments_conflict() {
         Args::command().debug_assert();
     }
 
     #[test]
-    fn defaults_to_polling_a_local_ha_every_30_seconds() {
-        let args = parse(&["front_door"]);
+    fn unset_arguments_fall_back_to_their_defaults() {
+        let args =
+            Args::try_parse_from(["night-watch", "--token", "s3cr3t", "front_door"]).unwrap();
 
         assert_eq!(args.entity, "front_door");
         assert_eq!(args.url.as_str(), "http://localhost:8123/");
