@@ -1,12 +1,32 @@
-use std::fmt;
-
 use anyhow::Result;
-use image::Pixel;
+use image::Rgb;
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::Source;
 use crate::home_assistant::{Entity, HomeAssistant};
+
+/// Mean spread between a pixel's colour channels, normalised to `0.0..=1.0`.
+/// Below this the frame is effectively greyscale, i.e. the camera has switched
+/// to infrared.
+const NIGHT_VISION_THRESHOLD: f64 = 0.005;
+
+/// Where the camera entity comes from.
+pub enum Source {
+    /// The camera entity itself.
+    Camera(String),
+    /// An `input_select` whose selected option names the camera entity.
+    Select(String),
+}
+
+impl Source {
+    pub fn new(entity: String, from_select: bool) -> Self {
+        if from_select {
+            Self::Select(entity)
+        } else {
+            Self::Camera(entity)
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Attributes {
@@ -16,12 +36,6 @@ struct Attributes {
 pub struct Camera<'a> {
     home_assistant: &'a HomeAssistant,
     source: Source,
-}
-
-impl fmt::Display for Camera<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.source)
-    }
 }
 
 impl<'a> Camera<'a> {
@@ -38,23 +52,21 @@ impl<'a> Camera<'a> {
             Source::Camera(camera) => camera.clone(),
         };
 
-        let image = self.home_assistant.get_camera_image(&camera).await?;
+        let image = self
+            .home_assistant
+            .get_camera_image(&format!("camera.{camera}"))
+            .await?;
 
-        let mut diff = 0;
+        let diff: u64 = image
+            .pixels()
+            .map(|&Rgb([r, g, b])| {
+                u64::from(r.abs_diff(g)) + u64::from(r.abs_diff(b)) + u64::from(g.abs_diff(b))
+            })
+            .sum();
 
-        for p in image.pixels() {
-            let channels = p.channels();
-            let (r, g, b) = (channels[0], channels[1], channels[2]);
-
-            let rg = ((r as i32) - (g as i32)).unsigned_abs();
-            let rb = ((r as i32) - (b as i32)).unsigned_abs();
-            let gb = ((g as i32) - (b as i32)).unsigned_abs();
-
-            diff += rg + rb + gb;
-        }
-
-        let f = (diff as f64) / (image.width() * image.height()) as f64 / (255.0 * 3.0);
-        let night_vision = f < 0.005;
+        let pixels = f64::from(image.width()) * f64::from(image.height());
+        let f = diff as f64 / pixels / (255.0 * 3.0);
+        let night_vision = f < NIGHT_VISION_THRESHOLD;
 
         debug!("{camera}.night_vision={night_vision} ({f:.8})");
 

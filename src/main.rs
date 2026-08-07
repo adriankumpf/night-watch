@@ -5,7 +5,7 @@ mod sun;
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{DateTime, offset::Utc};
+use chrono::{TimeDelta, offset::Utc};
 use clap::{Parser, crate_version};
 use reqwest::Url;
 use tokio::time;
@@ -13,9 +13,15 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 use tracing_subscriber::fmt;
 
-use camera::Camera;
+use camera::{Camera, Source};
 use home_assistant::HomeAssistant;
-use sun::{Event, Sun};
+use sun::Event;
+
+/// How long before a predicted sun event to start polling the camera.
+const LEAD_TIME: TimeDelta = TimeDelta::minutes(45);
+
+/// How long to back off when HA reports an event that has already passed.
+const STALE_EVENT_BACKOFF: Duration = Duration::from_secs(5);
 
 #[derive(Parser, Debug)]
 #[command(version = crate_version!())]
@@ -67,25 +73,6 @@ struct Args {
     entity: String,
 }
 
-pub enum Source {
-    Camera(String),
-    Select(String),
-}
-
-impl std::fmt::Display for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Camera(source) => write!(f, "{source}"),
-            Self::Select(source) => write!(f, "{source}"),
-        }
-    }
-}
-
-#[inline]
-fn until(time: &DateTime<Utc>) -> chrono::Duration {
-    *time - Utc::now()
-}
-
 fn init_logger(debug: bool) {
     let format = fmt::format().without_time().with_target(false).compact();
 
@@ -111,66 +98,53 @@ async fn main() -> Result<()> {
 
     init_logger(args.debug);
 
-    let source = if args.from_select {
-        Source::Select(args.entity)
-    } else {
-        Source::Camera(args.entity)
-    };
-
     let ha = HomeAssistant::new(args.url, &args.token, args.retry)?;
-    let cam = Camera::new(&ha, source);
-    let sun = Sun::new(&ha);
+    let cam = Camera::new(&ha, Source::new(args.entity, args.from_select));
 
-    let mut last_event = None;
+    let mut last_event: Option<Event> = None;
 
     'main: loop {
-        for event in &sun.next_events().await? {
-            if let (&Some(Event::Sunset(_)), Event::Sunset(_))
-            | (&Some(Event::Sunrise(_)), Event::Sunrise(_)) = (&last_event, event)
-            {
+        for event in sun::next_events(&ha).await? {
+            if last_event.is_some_and(|last| last.same_kind(event)) {
                 debug!("{event} was already handled!");
                 continue;
             }
 
-            let event_in = until(event);
-            let event_in_hours = event_in.num_minutes() as f32 / 60.0;
-            info!("Next {event} in {event_in_hours:.1} hours");
+            let event_in = event.at() - Utc::now();
 
-            if event_in.num_milliseconds() <= 0 {
+            info!(
+                "Next {event} in {:.1} hours",
+                event_in.num_minutes() as f32 / 60.0
+            );
+
+            if event_in <= TimeDelta::zero() {
                 warn!("The {event} is in the past");
-                time::sleep(Duration::from_secs(5)).await;
+                time::sleep(STALE_EVENT_BACKOFF).await;
                 continue 'main;
             }
 
-            let fourtyfive_minutes = chrono::Duration::try_minutes(45).unwrap();
-
-            if let Ok(sleep_for) = (event_in - fourtyfive_minutes).to_std() {
+            if let Ok(sleep_for) = (event_in - LEAD_TIME).to_std() {
                 time::sleep(sleep_for).await;
             }
 
-            info!("{event} in {} min", until(event).num_minutes());
+            info!("{event} in {} min", (event.at() - Utc::now()).num_minutes());
 
-            let ha_event = 'wait_for_event: loop {
+            let ha_event = loop {
                 let night_vision = cam.night_vision().await?;
 
-                let (do_send, ha_event) = match event {
-                    Event::Sunrise(_) => (!night_vision, &args.day_event),
-                    Event::Sunset(_) => (night_vision, &args.night_event),
-                };
-
-                if do_send {
-                    break 'wait_for_event ha_event;
+                match (event, night_vision) {
+                    (Event::Sunrise(_), false) => break &args.day_event,
+                    (Event::Sunset(_), true) => break &args.night_event,
+                    _ => time::sleep(Duration::from_secs(args.interval.into())).await,
                 }
-
-                time::sleep(Duration::from_secs(args.interval.into())).await;
             };
 
             let result = ha.send_event(ha_event).await?;
-            let diff = -until(event).num_minutes();
+            let late = (Utc::now() - event.at()).num_minutes();
 
-            info!("{} [{:+}]", result.message, diff);
+            info!("{} [{late:+}]", result.message);
 
-            last_event = Some(event.clone());
+            last_event = Some(event);
         }
     }
 }

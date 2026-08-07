@@ -1,5 +1,5 @@
 use std::fmt;
-use std::ops::Deref;
+use std::mem;
 
 use anyhow::Result;
 use chrono::{DateTime, offset::Utc};
@@ -17,58 +17,51 @@ enum State {
 
 #[derive(Debug, Deserialize)]
 struct Attributes {
-    pub next_rising: DateTime<Utc>,
-    pub next_setting: DateTime<Utc>,
+    next_rising: DateTime<Utc>,
+    next_setting: DateTime<Utc>,
 }
 
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Event {
     Sunset(DateTime<Utc>),
     Sunrise(DateTime<Utc>),
 }
 
-impl Deref for Event {
-    type Target = DateTime<Utc>;
+impl Event {
+    /// The time this event occurs at.
+    pub const fn at(self) -> DateTime<Utc> {
+        let (Self::Sunset(at) | Self::Sunrise(at)) = self;
+        at
+    }
 
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            Event::Sunset(ref dt) => dt,
-            Event::Sunrise(ref dt) => dt,
-        }
+    /// Whether both events are sunrises or both are sunsets, ignoring their times.
+    pub fn same_kind(self, other: Self) -> bool {
+        mem::discriminant(&self) == mem::discriminant(&other)
     }
 }
 
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Event::Sunset(_) => write!(f, "Sunset"),
-            Event::Sunrise(_) => write!(f, "Sunrise"),
-        }
+        f.write_str(match self {
+            Self::Sunset(_) => "Sunset",
+            Self::Sunrise(_) => "Sunrise",
+        })
     }
 }
 
-pub struct Sun<'a> {
-    home_assistant: &'a HomeAssistant,
-}
+/// The next sunset and sunrise, in the order they will occur.
+pub async fn next_events(home_assistant: &HomeAssistant) -> Result<[Event; 2]> {
+    let sun: Entity<Attributes, State> = home_assistant.get_entity("sun.sun").await?;
 
-impl<'a> Sun<'a> {
-    pub fn new(home_assistant: &'a HomeAssistant) -> Self {
-        Self { home_assistant }
-    }
+    let sunset = Event::Sunset(sun.attributes.next_setting);
+    let sunrise = Event::Sunrise(sun.attributes.next_rising);
 
-    pub async fn next_events(&self) -> Result<[Event; 2]> {
-        let sun: Entity<Attributes, State> = self.home_assistant.get_entity("sun.sun").await?;
+    let events = match sun.state {
+        State::AboveHorizon => [sunset, sunrise],
+        State::BelowHorizon => [sunrise, sunset],
+    };
 
-        let sunset = Event::Sunset(sun.attributes.next_setting);
-        let sunrise = Event::Sunrise(sun.attributes.next_rising);
+    debug!("Next events: {events:#?}");
 
-        let events = match sun.state {
-            State::AboveHorizon => [sunset, sunrise],
-            State::BelowHorizon => [sunrise, sunset],
-        };
-
-        debug!("Next events: {events:#?}");
-
-        Ok(events)
-    }
+    Ok(events)
 }
