@@ -1,27 +1,30 @@
-FROM clux/muslrust:stable AS builder
+# syntax=docker/dockerfile:1
 
-RUN useradd -u 10001 appuser
+FROM clux/muslrust:stable AS builder
 
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build --release
-
 COPY src src
-RUN touch src/main.rs && \
-    cargo build --release
+
+RUN cargo build --release --locked && \
+    cp target/*-linux-musl/release/night-watch /night-watch
 
 ##########################################################
 
+# The runtime image is `scratch`, which only works because the binary is
+# statically linked against musl and needs nothing from the filesystem:
+#
+#   * no CA certificates -- reqwest is built without a TLS backend, so the
+#     binary can only speak plain HTTP
+#   * no tzdata -- every timestamp is chrono's `Utc`
+#   * no writable /tmp -- camera frames are decoded in memory
+#
+# Revisit this base image if any of those stop being true.
 FROM scratch
 
-WORKDIR /app
+COPY --from=builder /night-watch /night-watch
 
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /app/target/*-linux-musl/release/night-watch .
+USER 10001:10001
 
-USER appuser
-
-ENTRYPOINT ["./night-watch"]
+ENTRYPOINT ["/night-watch"]
