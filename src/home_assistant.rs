@@ -1,11 +1,11 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use image::RgbImage;
 use reqwest::{Method, Response, Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use reqwest_retry::Jitter;
+use reqwest_retry::{Jitter, RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::{Deserialize, de::DeserializeOwned};
-use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
@@ -18,7 +18,6 @@ pub struct EventResult {
     pub message: String,
 }
 
-#[derive(Clone)]
 pub struct HomeAssistant {
     client: ClientWithMiddleware,
     base: Url,
@@ -46,11 +45,12 @@ impl HomeAssistant {
                 .build_with_total_retry_duration_and_limit_retries(Duration::from_secs(2 * 60));
 
             client = client.with(RetryTransientMiddleware::new_with_policy(retry_policy));
-        };
+        }
 
-        let client = client.build();
-
-        Ok(Self { client, base })
+        Ok(Self {
+            client: client.build(),
+            base,
+        })
     }
 
     async fn request(&self, method: Method, path: &str) -> Result<Response> {
