@@ -1,2 +1,7 @@
 /target
 **/*.rs.bk
+
+# Wherever the HA token ends up locally: a `.env` to source before `cargo run`,
+# or the `secrets/` directory the compose example in the README asks for.
+.env*
+/secrets/
