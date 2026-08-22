@@ -23,6 +23,16 @@ pub struct HomeAssistant {
     base: Url,
 }
 
+/// The bearer header, marked sensitive so that anything that formats the
+/// headers redacts it rather than printing the token, hyper's own request
+/// logging included.
+fn auth_header(token: &str) -> Result<header::HeaderValue> {
+    let mut value = header::HeaderValue::from_str(&format!("Bearer {token}"))?;
+    value.set_sensitive(true);
+
+    Ok(value)
+}
+
 impl HomeAssistant {
     pub fn new(mut base: Url, token: &str, retry: bool) -> Result<Self> {
         if base.cannot_be_a_base() {
@@ -35,10 +45,7 @@ impl HomeAssistant {
             .pop_if_empty();
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {token}"))?,
-        );
+        headers.insert(header::AUTHORIZATION, auth_header(token)?);
 
         let mut client = ClientBuilder::new(
             reqwest::Client::builder()
@@ -152,6 +159,14 @@ mod tests {
         let url = client("http://ha.local", false).url(&["api", "states", "../../evil"]);
 
         assert_eq!(url.as_str(), "http://ha.local/api/states/..%2F..%2Fevil");
+    }
+
+    #[test]
+    fn the_authorization_header_does_not_print_the_token() {
+        let auth = auth_header(TOKEN).unwrap();
+
+        assert!(auth.is_sensitive());
+        assert!(!format!("{auth:?}").contains(TOKEN), "{auth:?}");
     }
 
     #[test]
