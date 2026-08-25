@@ -140,13 +140,42 @@ async fn main() -> Result<()> {
     init_logger(args.debug);
 
     let token = args.token()?;
-    let ha = HomeAssistant::new(args.url, &token, args.retry)?;
-    let cam = Camera::new(&ha, Source::new(args.entity, args.from_select));
+    let ha = HomeAssistant::new(args.url.clone(), &token, args.retry)?;
+    let cam = Camera::new(&ha, Source::new(args.entity.clone(), args.from_select));
 
+    tokio::select! {
+        result = watch(&ha, &cam, &args) => result,
+        () = shutdown_signal()? => Ok(()),
+    }
+}
+
+/// Registers the termination signals up front so a missing handler fails
+/// startup, and resolves once either one arrives.
+///
+/// Not optional: the container runs this binary as PID 1, where the kernel
+/// drops a default-disposition SIGTERM, so without a handler `docker stop`
+/// waits out its timeout and lands on SIGKILL.
+fn shutdown_signal() -> Result<impl Future<Output = ()>> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+
+    Ok(async move {
+        let signal = tokio::select! {
+            _ = interrupt.recv() => "SIGINT",
+            _ = terminate.recv() => "SIGTERM",
+        };
+
+        info!("received {signal}, shutting down");
+    })
+}
+
+async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> {
     let mut last_event: Option<Event> = None;
 
     'main: loop {
-        for event in sun::next_events(&ha).await? {
+        for event in sun::next_events(ha).await? {
             if last_event.is_some_and(|last| last.same_kind(event)) {
                 debug!("{event} was already handled!");
                 continue;
