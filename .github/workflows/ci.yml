@@ -84,7 +84,7 @@ jobs:
       # list in publish_image, once both architectures exist.
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
