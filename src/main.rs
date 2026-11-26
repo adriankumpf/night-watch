@@ -50,11 +50,6 @@ struct Args {
     #[arg(short, long)]
     debug: bool,
 
-    /// Ignored. Failures are always retried, every `--interval`. Kept so that
-    /// existing deployments passing it still start.
-    #[arg(short, long, hide = true)]
-    retry: bool,
-
     /// Fetches the camera entity from an input_select element instead
     #[arg(short = 's', long)]
     from_select: bool,
@@ -159,10 +154,6 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     init_logger(args.debug);
-
-    if args.retry {
-        warn!("--retry is deprecated and has no effect: failures are always retried");
-    }
 
     let token = args.token()?;
     let ha = HomeAssistant::new(args.url.clone(), &token)?;
@@ -465,13 +456,6 @@ mod tests {
     #[test]
     fn a_zero_interval_is_rejected() {
         assert!(parse(&["-T", "t", "-I", "0", "e"]).is_err());
-    }
-
-    /// Existing deployments pass it; it must not stop them from starting.
-    #[test]
-    fn the_retired_retry_flag_is_still_accepted() {
-        assert!(parse(&["-T", "t", "-r", "e"]).unwrap().retry);
-        assert!(parse(&["-T", "t", "--retry", "e"]).unwrap().retry);
     }
 
     #[test]
