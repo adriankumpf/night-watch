@@ -77,9 +77,11 @@ impl Sun {
     ///
     /// HA only reports upcoming events, so the time is estimated as a day
     /// before the next one of the same kind. That is a few minutes off as the
-    /// days lengthen or shorten, which is good enough to tell a recent event
-    /// from an old one. Near the poles, where the next one can be days away,
-    /// the estimate lands in the future and nothing is returned.
+    /// days lengthen or shorten, and while they lengthen the estimate can land
+    /// just after `now` although the state shows the event has happened. So
+    /// `window` applies on both sides. Near the poles, where the next event can
+    /// be days away, the estimate is far off either way and nothing is
+    /// returned.
     pub fn previous_event(&self, now: DateTime<Utc>, window: TimeDelta) -> Option<Event> {
         let event = match self.0.state {
             State::AboveHorizon => {
@@ -92,7 +94,7 @@ impl Sun {
 
         let ago = now - event.at();
 
-        (ago >= TimeDelta::zero() && ago <= window).then_some(event)
+        (ago.abs() <= window).then_some(event)
     }
 }
 
@@ -211,11 +213,21 @@ mod tests {
             sun.previous_event(at("2024-04-19T21:05:00Z"), window)
                 .is_none()
         );
-        // Before the estimate, e.g. a polar day where the next setting is
-        // further out than a day.
+        // Far before the estimate, as near the poles, where the next setting
+        // can be days away.
         assert!(
-            sun.previous_event(at("2024-04-19T19:00:00Z"), window)
+            sun.previous_event(at("2024-04-17T19:00:00Z"), window)
                 .is_none()
         );
+    }
+
+    /// While the days lengthen, the next sunset is later than the one that
+    /// just happened, so right after sunset the estimate is still ahead.
+    #[tokio::test]
+    async fn a_sunset_moments_ago_is_reported_although_the_estimate_is_ahead() {
+        let sun = fetch("below_horizon").await;
+        let previous = sun.previous_event(at("2024-04-19T19:02:00Z"), TimeDelta::hours(1));
+
+        assert!(matches!(previous, Some(Event::Sunset(_))));
     }
 }

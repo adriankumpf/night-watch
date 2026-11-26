@@ -28,10 +28,17 @@ const STALE_EVENT_BACKOFF: Duration = Duration::from_secs(5);
 
 /// How long after a sun event a fresh start still handles it. A restart while
 /// the event was being polled for would otherwise skip it, as HA already
-/// reports the following one. The camera still has to agree, so a repeat can
-/// only send an event that was already sent. It stays short because that
-/// repeat would undo whatever was done by hand in the meantime.
-const CATCH_UP_WINDOW: TimeDelta = TimeDelta::hours(2);
+/// reports the following one. Nothing records whether the event already went
+/// out, so a restart inside the window after it did sends it again, undoing
+/// whatever was changed by hand in the meantime. The window is kept short for
+/// that reason, with room above the latest event seen in production (+16 min).
+const CATCH_UP_WINDOW: TimeDelta = TimeDelta::hours(1);
+
+/// How long HA and the camera get to answer at startup. Past this, failures
+/// are retried for as long as it takes, which would otherwise turn a wrong
+/// URL or entity into an endless stream of warnings instead of an exit. It
+/// leaves HA time to finish starting when both come up together.
+const STARTUP_GRACE: Duration = Duration::from_secs(5 * 60);
 
 // No `Debug`: `token` holds the secret, so deriving one would put it a
 // `{args:?}` away from a log line.
@@ -51,8 +58,14 @@ struct Args {
     #[arg(short = 's', long)]
     from_select: bool,
 
-    /// Polling interval (in seconds)
-    #[arg(short = 'I', long, default_value = "30", display_order = 1)]
+    /// Polling interval (in seconds), also the pause before retrying a failure
+    #[arg(
+        short = 'I',
+        long,
+        default_value = "30",
+        value_parser = clap::value_parser!(u16).range(1..),
+        display_order = 1
+    )]
     interval: u16,
 
     /// Event sent to HA when the camera turns on night vision
@@ -186,12 +199,17 @@ async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> 
         Event::Sunset(_) => args.night_event.as_str(),
     };
 
+    let sun = time::timeout(STARTUP_GRACE, async {
+        let sun = fetch_sun().await?;
+        persist("Checking the camera", pause, || cam.night_vision()).await?;
+        anyhow::Ok(sun)
+    })
+    .await
+    .context("HA or the camera kept failing since startup, see the warnings above")??;
+
     let mut last_event: Option<Event> = None;
 
-    if let Some(event) = fetch_sun()
-        .await?
-        .previous_event(Utc::now(), CATCH_UP_WINDOW)
-    {
+    if let Some(event) = sun.previous_event(Utc::now(), CATCH_UP_WINDOW) {
         info!(
             "Catching up on the {event} {} min ago",
             (Utc::now() - event.at()).num_minutes()
@@ -239,6 +257,8 @@ async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> 
 /// Fails only on [an error that retrying cannot fix][home_assistant::is_permanent].
 /// Anything else is retried, since giving up here is what drops the event:
 /// by the time a restarted process asks, HA already reports the next one.
+/// That includes sending the event, which HA may have fired before the
+/// response got lost. A repeated event is the lesser evil.
 async fn handle(
     ha: &HomeAssistant,
     cam: &Camera<'_>,
@@ -247,7 +267,12 @@ async fn handle(
     pause: Duration,
 ) -> Result<()> {
     loop {
-        let night_vision = persist("Polling the camera", pause, || cam.night_vision()).await?;
+        let night_vision = persist(
+            &format!("Polling the camera for the {event}"),
+            pause,
+            || cam.night_vision(),
+        )
+        .await?;
 
         match (event, night_vision) {
             (Event::Sunrise(_), false) | (Event::Sunset(_), true) => break,
@@ -255,7 +280,10 @@ async fn handle(
         }
     }
 
-    let result = persist("Sending the event", pause, || ha.send_event(ha_event)).await?;
+    let result = persist(&format!("Sending {ha_event}"), pause, || {
+        ha.send_event(ha_event)
+    })
+    .await?;
     let late = (Utc::now() - event.at()).num_minutes();
 
     info!("{} [{late:+}]", result.message);
@@ -426,6 +454,12 @@ mod tests {
         assert_eq!(args.night_event, "close_rollershutters");
         assert!(!args.debug && !args.retry && !args.from_select);
         assert_eq!(args.token().unwrap(), "s3cr3t");
+    }
+
+    /// Every failure is retried after one interval, so 0 would spin.
+    #[test]
+    fn a_zero_interval_is_rejected() {
+        assert!(parse(&["-T", "t", "-I", "0", "e"]).is_err());
     }
 
     #[test]
