@@ -15,7 +15,6 @@ Arguments:
 Options:
   -d, --debug                      Print debug logs
   -I, --interval <INTERVAL>        Polling interval (in seconds), also the pause before retrying a failure [default: 30]
-  -r, --retry                      Retry failed requests with increasing intervals between attempts (up to 2 minutes)
   -D, --day-event <DAY_EVENT>      Event sent to HA when the camera turns off night vision [default: open_rollershutters]
   -N, --night-event <NIGHT_EVENT>  Event sent to HA when the camera turns on night vision [default: close_rollershutters]
   -s, --from-select                Fetches the camera entity from an input_select element instead

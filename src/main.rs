@@ -50,10 +50,6 @@ struct Args {
     #[arg(short, long)]
     debug: bool,
 
-    /// Retry failed requests with increasing intervals between attempts (up to 2 minutes)
-    #[arg(short, long)]
-    retry: bool,
-
     /// Fetches the camera entity from an input_select element instead
     #[arg(short = 's', long)]
     from_select: bool,
@@ -160,7 +156,7 @@ async fn main() -> Result<()> {
     init_logger(args.debug);
 
     let token = args.token()?;
-    let ha = HomeAssistant::new(args.url.clone(), &token, args.retry)?;
+    let ha = HomeAssistant::new(args.url.clone(), &token)?;
     let cam = Camera::new(&ha, Source::new(args.entity.clone(), args.from_select));
 
     tokio::select! {
@@ -294,9 +290,9 @@ async fn handle(
 /// Runs `attempt` until it succeeds or fails permanently, sleeping `pause`
 /// between attempts and logging each failure, prefixed with `what`.
 ///
-/// This sits on top of the opt-in `--retry` middleware, which gives up on the
-/// 404s HA answers while it starts up or reloads an integration and only
-/// covers the HTTP exchange, not decoding what came back.
+/// This is the only retry layer. It covers decoding what came back as well
+/// as the HTTP exchange, and the 404s HA answers while it starts up or
+/// reloads an integration.
 async fn persist<T, F>(what: &str, pause: Duration, mut attempt: impl FnMut() -> F) -> Result<T>
 where
     F: Future<Output = Result<T>>,
@@ -452,7 +448,7 @@ mod tests {
         assert_eq!(args.interval, 30);
         assert_eq!(args.day_event, "open_rollershutters");
         assert_eq!(args.night_event, "close_rollershutters");
-        assert!(!args.debug && !args.retry && !args.from_select);
+        assert!(!args.debug && !args.from_select);
         assert_eq!(args.token().unwrap(), "s3cr3t");
     }
 

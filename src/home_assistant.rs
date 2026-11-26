@@ -2,14 +2,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use image::RgbImage;
-use reqwest::{Method, Response, StatusCode, Url, header};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{
-    DefaultRetryableStrategy, Jitter, RetryTransientMiddleware, Retryable, RetryableStrategy,
-    policies::ExponentialBackoff,
-};
+use reqwest::{Client, Method, Response, StatusCode, Url, header};
 use serde::{Deserialize, de::DeserializeOwned};
-use tracing::warn;
 
 /// Upper bound for a single request. The callers retry failures, which only
 /// helps if a request that HA never answers fails rather than hangs.
@@ -27,7 +21,7 @@ pub struct EventResult {
 }
 
 pub struct HomeAssistant {
-    client: ClientWithMiddleware,
+    client: Client,
     base: Url,
 }
 
@@ -52,27 +46,8 @@ pub fn is_permanent(error: &anyhow::Error) -> bool {
         .any(|status| matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN))
 }
 
-/// The default strategy, but saying what failed. The middleware's own
-/// warning only gives the attempt number and the delay.
-struct LoggedStrategy;
-
-impl RetryableStrategy for LoggedStrategy {
-    fn handle(&self, result: &reqwest_middleware::Result<Response>) -> Option<Retryable> {
-        let retryable = DefaultRetryableStrategy.handle(result);
-
-        if retryable == Some(Retryable::Transient) {
-            match result {
-                Ok(response) => warn!("{} answered {}", response.url(), response.status()),
-                Err(error) => warn!("{error:#}"),
-            }
-        }
-
-        retryable
-    }
-}
-
 impl HomeAssistant {
-    pub fn new(mut base: Url, token: &str, retry: bool) -> Result<Self> {
+    pub fn new(mut base: Url, token: &str) -> Result<Self> {
         if base.cannot_be_a_base() {
             return Err(anyhow!("{base} cannot be a base URL"));
         }
@@ -85,30 +60,12 @@ impl HomeAssistant {
         let mut headers = header::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, auth_header(token)?);
 
-        let mut client = ClientBuilder::new(
-            reqwest::Client::builder()
-                .default_headers(headers)
-                .timeout(REQUEST_TIMEOUT)
-                .build()?,
-        );
+        let client = Client::builder()
+            .default_headers(headers)
+            .timeout(REQUEST_TIMEOUT)
+            .build()?;
 
-        if retry {
-            let retry_policy = ExponentialBackoff::builder()
-                .base(2)
-                .jitter(Jitter::None)
-                .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
-                .build_with_total_retry_duration_and_limit_retries(Duration::from_secs(2 * 60));
-
-            client = client.with(RetryTransientMiddleware::new_with_policy_and_strategy(
-                retry_policy,
-                LoggedStrategy,
-            ));
-        }
-
-        Ok(Self {
-            client: client.build(),
-            base,
-        })
+        Ok(Self { client, base })
     }
 
     /// The base URL with `segments` appended to whatever path it already has,
@@ -202,20 +159,20 @@ mod tests {
         let states = ["api", "states", "sun.sun"];
 
         for base in ["http://ha.local:8123", "http://ha.local:8123/"] {
-            let url = client(base, false).url(&states);
+            let url = client(base).url(&states);
             assert_eq!(url.as_str(), "http://ha.local:8123/api/states/sun.sun");
         }
 
         // A HA served under a sub-path by a reverse proxy.
         for base in ["https://home.example/hass", "https://home.example/hass/"] {
-            let url = client(base, false).url(&states);
+            let url = client(base).url(&states);
             assert_eq!(url.as_str(), "https://home.example/hass/api/states/sun.sun");
         }
     }
 
     #[test]
     fn entity_ids_cannot_escape_the_api_path() {
-        let url = client("http://ha.local", false).url(&["api", "states", "../../evil"]);
+        let url = client("http://ha.local").url(&["api", "states", "../../evil"]);
 
         assert_eq!(url.as_str(), "http://ha.local/api/states/..%2F..%2Fevil");
     }
@@ -232,7 +189,7 @@ mod tests {
     fn a_url_that_cannot_be_a_base_is_rejected() {
         let base = "mailto:ha@example.com".parse().unwrap();
 
-        let Err(error) = HomeAssistant::new(base, TOKEN, false) else {
+        let Err(error) = HomeAssistant::new(base, TOKEN) else {
             panic!("a mailto: URL cannot be a base and must be rejected");
         };
 
@@ -349,7 +306,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn error_responses_are_not_retried_by_default() {
+    async fn error_responses_are_not_retried() {
         let server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -364,29 +321,5 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("401"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn transient_errors_are_retried_when_enabled() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(500))
-            .up_to_n_times(1)
-            .with_priority(1)
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        Mock::given(method("POST"))
-            .respond_with(json_response(r#"{"message": "Event fired."}"#))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let ha = client(&server.uri(), true);
-        let result = ha.send_event("open_rollershutters").await.unwrap();
-
-        assert_eq!(result.message, "Event fired.");
     }
 }
