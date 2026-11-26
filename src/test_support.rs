@@ -9,14 +9,14 @@ use crate::home_assistant::HomeAssistant;
 
 pub const TOKEN: &str = "s3cr3t";
 
-/// A client for `base`, retrying transient failures if `retry`.
-pub fn client(base: &str, retry: bool) -> HomeAssistant {
-    HomeAssistant::new(base.parse().expect("a valid base URL"), TOKEN, retry).unwrap()
+/// A client for `base`.
+pub fn client(base: &str) -> HomeAssistant {
+    HomeAssistant::new(base.parse().expect("a valid base URL"), TOKEN).unwrap()
 }
 
-/// A client for `server`, without retries.
+/// A client for `server`.
 pub fn home_assistant(server: &MockServer) -> HomeAssistant {
-    client(&server.uri(), false)
+    client(&server.uri())
 }
 
 /// An image in which every pixel has the same colour.
