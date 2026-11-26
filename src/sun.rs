@@ -2,7 +2,7 @@ use std::fmt;
 use std::mem;
 
 use anyhow::Result;
-use chrono::{DateTime, offset::Utc};
+use chrono::{DateTime, TimeDelta, offset::Utc};
 use serde::Deserialize;
 use tracing::debug;
 
@@ -49,21 +49,53 @@ impl fmt::Display for Event {
     }
 }
 
-/// The next sunset and sunrise, in the order they will occur.
-pub async fn next_events(home_assistant: &HomeAssistant) -> Result<[Event; 2]> {
-    let sun: Entity<Attributes, State> = home_assistant.get_entity("sun.sun").await?;
+/// HA's `sun.sun` entity at the time it was fetched.
+pub struct Sun(Entity<Attributes, State>);
 
-    let sunset = Event::Sunset(sun.attributes.next_setting);
-    let sunrise = Event::Sunrise(sun.attributes.next_rising);
+impl Sun {
+    pub async fn fetch(home_assistant: &HomeAssistant) -> Result<Self> {
+        Ok(Self(home_assistant.get_entity("sun.sun").await?))
+    }
 
-    let events = match sun.state {
-        State::AboveHorizon => [sunset, sunrise],
-        State::BelowHorizon => [sunrise, sunset],
-    };
+    /// The next sunset and sunrise, in the order they will occur.
+    pub fn next_events(&self) -> [Event; 2] {
+        let sunset = Event::Sunset(self.0.attributes.next_setting);
+        let sunrise = Event::Sunrise(self.0.attributes.next_rising);
 
-    debug!("Next events: {events:#?}");
+        let events = match self.0.state {
+            State::AboveHorizon => [sunset, sunrise],
+            State::BelowHorizon => [sunrise, sunset],
+        };
 
-    Ok(events)
+        debug!("Next events: {events:#?}");
+
+        events
+    }
+
+    /// The sun event that last occurred, if that was no more than `window`
+    /// before `now`.
+    ///
+    /// HA only reports upcoming events, so the time is estimated as a day
+    /// before the next one of the same kind. That is a few minutes off as the
+    /// days lengthen or shorten, and while they lengthen the estimate can land
+    /// just after `now` although the state shows the event has happened. So
+    /// `window` applies on both sides. Near the poles, where the next event can
+    /// be days away, the estimate is far off either way and nothing is
+    /// returned.
+    pub fn previous_event(&self, now: DateTime<Utc>, window: TimeDelta) -> Option<Event> {
+        let event = match self.0.state {
+            State::AboveHorizon => {
+                Event::Sunrise(self.0.attributes.next_rising - TimeDelta::days(1))
+            }
+            State::BelowHorizon => {
+                Event::Sunset(self.0.attributes.next_setting - TimeDelta::days(1))
+            }
+        };
+
+        let ago = now - event.at();
+
+        (ago.abs() <= window).then_some(event)
+    }
 }
 
 #[cfg(test)]
@@ -124,11 +156,15 @@ mod tests {
         assert_eq!(Event::Sunrise(now).to_string(), "Sunrise");
     }
 
+    async fn fetch(state: &str) -> Sun {
+        let server = serve_sun(state).await;
+
+        Sun::fetch(&home_assistant(&server)).await.unwrap()
+    }
+
     #[tokio::test]
     async fn the_sunset_comes_first_while_the_sun_is_up() {
-        let server = serve_sun("above_horizon").await;
-
-        let [first, second] = next_events(&home_assistant(&server)).await.unwrap();
+        let [first, second] = fetch("above_horizon").await.next_events();
 
         assert!(matches!(first, Event::Sunset(_)));
         assert_eq!(first.at(), at("2024-04-20T19:04:16.303030+00:00"));
@@ -138,11 +174,60 @@ mod tests {
 
     #[tokio::test]
     async fn the_sunrise_comes_first_while_the_sun_is_down() {
-        let server = serve_sun("below_horizon").await;
-
-        let [first, second] = next_events(&home_assistant(&server)).await.unwrap();
+        let [first, second] = fetch("below_horizon").await.next_events();
 
         assert!(matches!(first, Event::Sunrise(_)));
         assert!(matches!(second, Event::Sunset(_)));
+    }
+
+    #[tokio::test]
+    async fn the_previous_sunset_is_a_day_before_the_next_one() {
+        let sun = fetch("below_horizon").await;
+        let window = TimeDelta::hours(2);
+
+        // The next setting is 2024-04-20T19:04:16, so the last one was at
+        // about 2024-04-19T19:04:16.
+        let previous = sun.previous_event(at("2024-04-19T20:00:00Z"), window);
+
+        assert!(matches!(previous, Some(Event::Sunset(_))));
+        assert_eq!(
+            previous.unwrap().at(),
+            at("2024-04-19T19:04:16.303030+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_previous_sunrise_is_reported_while_the_sun_is_up() {
+        let sun = fetch("above_horizon").await;
+        let previous = sun.previous_event(at("2024-04-19T05:30:00Z"), TimeDelta::hours(2));
+
+        assert!(matches!(previous, Some(Event::Sunrise(_))));
+    }
+
+    #[tokio::test]
+    async fn an_event_outside_the_window_is_not_reported() {
+        let sun = fetch("below_horizon").await;
+        let window = TimeDelta::hours(2);
+
+        assert!(
+            sun.previous_event(at("2024-04-19T21:05:00Z"), window)
+                .is_none()
+        );
+        // Far before the estimate, as near the poles, where the next setting
+        // can be days away.
+        assert!(
+            sun.previous_event(at("2024-04-17T19:00:00Z"), window)
+                .is_none()
+        );
+    }
+
+    /// While the days lengthen, the next sunset is later than the one that
+    /// just happened, so right after sunset the estimate is still ahead.
+    #[tokio::test]
+    async fn a_sunset_moments_ago_is_reported_although_the_estimate_is_ahead() {
+        let sun = fetch("below_horizon").await;
+        let previous = sun.previous_event(at("2024-04-19T19:02:00Z"), TimeDelta::hours(1));
+
+        assert!(matches!(previous, Some(Event::Sunset(_))));
     }
 }

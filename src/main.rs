@@ -18,13 +18,27 @@ use tracing_subscriber::fmt;
 
 use camera::{Camera, Source};
 use home_assistant::HomeAssistant;
-use sun::Event;
+use sun::{Event, Sun};
 
 /// How long before a predicted sun event to start polling the camera.
 const LEAD_TIME: TimeDelta = TimeDelta::minutes(45);
 
 /// How long to back off when HA reports an event that has already passed.
 const STALE_EVENT_BACKOFF: Duration = Duration::from_secs(5);
+
+/// How long after a sun event a fresh start still handles it. A restart while
+/// the event was being polled for would otherwise skip it, as HA already
+/// reports the following one. Nothing records whether the event already went
+/// out, so a restart inside the window after it did sends it again, undoing
+/// whatever was changed by hand in the meantime. The window is kept short for
+/// that reason, with room above the latest event seen in production (+16 min).
+const CATCH_UP_WINDOW: TimeDelta = TimeDelta::hours(1);
+
+/// How long HA and the camera get to answer at startup. Past this, failures
+/// are retried for as long as it takes, which would otherwise turn a wrong
+/// URL or entity into an endless stream of warnings instead of an exit. It
+/// leaves HA time to finish starting when both come up together.
+const STARTUP_GRACE: Duration = Duration::from_secs(5 * 60);
 
 // No `Debug`: `token` holds the secret, so deriving one would put it a
 // `{args:?}` away from a log line.
@@ -44,8 +58,14 @@ struct Args {
     #[arg(short = 's', long)]
     from_select: bool,
 
-    /// Polling interval (in seconds)
-    #[arg(short = 'I', long, default_value = "30", display_order = 1)]
+    /// Polling interval (in seconds), also the pause before retrying a failure
+    #[arg(
+        short = 'I',
+        long,
+        default_value = "30",
+        value_parser = clap::value_parser!(u16).range(1..),
+        display_order = 1
+    )]
     interval: u16,
 
     /// Event sent to HA when the camera turns on night vision
@@ -172,10 +192,35 @@ fn shutdown_signal() -> Result<impl Future<Output = ()>> {
 }
 
 async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> {
+    let pause = Duration::from_secs(args.interval.into());
+    let fetch_sun = || persist("Fetching sun.sun", pause, || Sun::fetch(ha));
+    let ha_event = |event| match event {
+        Event::Sunrise(_) => args.day_event.as_str(),
+        Event::Sunset(_) => args.night_event.as_str(),
+    };
+
+    let sun = time::timeout(STARTUP_GRACE, async {
+        let sun = fetch_sun().await?;
+        persist("Checking the camera", pause, || cam.night_vision()).await?;
+        anyhow::Ok(sun)
+    })
+    .await
+    .context("HA or the camera kept failing since startup, see the warnings above")??;
+
     let mut last_event: Option<Event> = None;
 
+    if let Some(event) = sun.previous_event(Utc::now(), CATCH_UP_WINDOW) {
+        info!(
+            "Catching up on the {event} {} min ago",
+            (Utc::now() - event.at()).num_minutes()
+        );
+
+        handle(ha, cam, event, ha_event(event), pause).await?;
+        last_event = Some(event);
+    }
+
     'main: loop {
-        for event in sun::next_events(ha).await? {
+        for event in fetch_sun().await?.next_events() {
             if last_event.is_some_and(|last| last.same_kind(event)) {
                 debug!("{event} was already handled!");
                 continue;
@@ -200,22 +245,70 @@ async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> 
 
             info!("{event} in {} min", (event.at() - Utc::now()).num_minutes());
 
-            let ha_event = loop {
-                let night_vision = cam.night_vision().await?;
-
-                match (event, night_vision) {
-                    (Event::Sunrise(_), false) => break &args.day_event,
-                    (Event::Sunset(_), true) => break &args.night_event,
-                    _ => time::sleep(Duration::from_secs(args.interval.into())).await,
-                }
-            };
-
-            let result = ha.send_event(ha_event).await?;
-            let late = (Utc::now() - event.at()).num_minutes();
-
-            info!("{} [{late:+}]", result.message);
-
+            handle(ha, cam, event, ha_event(event), pause).await?;
             last_event = Some(event);
+        }
+    }
+}
+
+/// Polls the camera every `pause` until it matches `event`, then sends
+/// `ha_event` to HA.
+///
+/// Fails only on [an error that retrying cannot fix][home_assistant::is_permanent].
+/// Anything else is retried, since giving up here is what drops the event:
+/// by the time a restarted process asks, HA already reports the next one.
+/// That includes sending the event, which HA may have fired before the
+/// response got lost. A repeated event is the lesser evil.
+async fn handle(
+    ha: &HomeAssistant,
+    cam: &Camera<'_>,
+    event: Event,
+    ha_event: &str,
+    pause: Duration,
+) -> Result<()> {
+    loop {
+        let night_vision = persist(
+            &format!("Polling the camera for the {event}"),
+            pause,
+            || cam.night_vision(),
+        )
+        .await?;
+
+        match (event, night_vision) {
+            (Event::Sunrise(_), false) | (Event::Sunset(_), true) => break,
+            _ => time::sleep(pause).await,
+        }
+    }
+
+    let result = persist(&format!("Sending {ha_event}"), pause, || {
+        ha.send_event(ha_event)
+    })
+    .await?;
+    let late = (Utc::now() - event.at()).num_minutes();
+
+    info!("{} [{late:+}]", result.message);
+
+    Ok(())
+}
+
+/// Runs `attempt` until it succeeds or fails permanently, sleeping `pause`
+/// between attempts and logging each failure, prefixed with `what`.
+///
+/// This sits on top of the opt-in `--retry` middleware, which gives up on the
+/// 404s HA answers while it starts up or reloads an integration and only
+/// covers the HTTP exchange, not decoding what came back.
+async fn persist<T, F>(what: &str, pause: Duration, mut attempt: impl FnMut() -> F) -> Result<T>
+where
+    F: Future<Output = Result<T>>,
+{
+    loop {
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(error) if home_assistant::is_permanent(&error) => return Err(error),
+            Err(error) => {
+                warn!("{what} failed, trying again in {pause:?}: {error:#}");
+                time::sleep(pause).await;
+            }
         }
     }
 }
@@ -224,8 +317,110 @@ async fn watch(ha: &HomeAssistant, cam: &Camera<'_>, args: &Args) -> Result<()> 
 mod tests {
     use clap::{CommandFactory, FromArgMatches};
     use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::test_support::{home_assistant, jpeg_response, json_response, solid};
+
+    const PAUSE: Duration = Duration::from_millis(1);
+
+    /// Serves the camera frames `failures` first, then a night vision one,
+    /// and accepts the night event.
+    async fn serve_failing_camera(failures: Vec<ResponseTemplate>) -> MockServer {
+        let server = MockServer::start().await;
+
+        for failure in failures {
+            Mock::given(path("/api/camera_proxy/camera.terrasse"))
+                .respond_with(failure)
+                .up_to_n_times(1)
+                .with_priority(1)
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+
+        Mock::given(path("/api/camera_proxy/camera.terrasse"))
+            .respond_with(jpeg_response(&solid(16, 16, [40, 40, 40])))
+            .with_priority(2)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/events/close_rollershutters"))
+            .respond_with(json_response(r#"{"message": "Event fired."}"#))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        server
+    }
+
+    /// What took the process down twice on sunset in production: the camera
+    /// entity vanishing for a moment, and a frame that is no image.
+    #[tokio::test]
+    async fn the_event_is_sent_once_the_camera_recovers() {
+        let server = serve_failing_camera(vec![
+            ResponseTemplate::new(404),
+            ResponseTemplate::new(503),
+            ResponseTemplate::new(200),
+        ])
+        .await;
+
+        let ha = home_assistant(&server);
+        let cam = Camera::new(&ha, Source::new("terrasse".into(), false));
+        let sunset = Event::Sunset(Utc::now());
+
+        handle(&ha, &cam, sunset, "close_rollershutters", PAUSE)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sending_the_event_is_retried() {
+        let server = serve_failing_camera(vec![]).await;
+
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(502))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let ha = home_assistant(&server);
+        let cam = Camera::new(&ha, Source::new("terrasse".into(), false));
+
+        handle(
+            &ha,
+            &cam,
+            Event::Sunset(Utc::now()),
+            "close_rollershutters",
+            PAUSE,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rejected_token_is_not_retried() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let ha = home_assistant(&server);
+        let error = persist("Fetching sun.sun", PAUSE, || Sun::fetch(&ha))
+            .await
+            .err()
+            .unwrap();
+
+        assert!(error.to_string().contains("401"), "{error}");
+    }
 
     /// Parses with every `env` source detached, so that a `TOKEN` exported in
     /// the developer's own shell cannot change what these tests see.
@@ -259,6 +454,12 @@ mod tests {
         assert_eq!(args.night_event, "close_rollershutters");
         assert!(!args.debug && !args.retry && !args.from_select);
         assert_eq!(args.token().unwrap(), "s3cr3t");
+    }
+
+    /// Every failure is retried after one interval, so 0 would spin.
+    #[test]
+    fn a_zero_interval_is_rejected() {
+        assert!(parse(&["-T", "t", "-I", "0", "e"]).is_err());
     }
 
     #[test]

@@ -1,11 +1,19 @@
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use image::RgbImage;
-use reqwest::{Method, Response, Url, header};
+use reqwest::{Method, Response, StatusCode, Url, header};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{Jitter, RetryTransientMiddleware, policies::ExponentialBackoff};
+use reqwest_retry::{
+    DefaultRetryableStrategy, Jitter, RetryTransientMiddleware, Retryable, RetryableStrategy,
+    policies::ExponentialBackoff,
+};
 use serde::{Deserialize, de::DeserializeOwned};
+use tracing::warn;
+
+/// Upper bound for a single request. The callers retry failures, which only
+/// helps if a request that HA never answers fails rather than hangs.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Deserialize)]
 pub struct Entity<T, S> {
@@ -33,6 +41,36 @@ fn auth_header(token: &str) -> Result<header::HeaderValue> {
     Ok(value)
 }
 
+/// Whether `error` is a response no amount of retrying will change: HA
+/// rejecting the token. Everything else, a 404 included, can be HA still
+/// starting up or an integration reloading, and is worth another try.
+pub fn is_permanent(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<reqwest::Error>())
+        .filter_map(reqwest::Error::status)
+        .any(|status| matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN))
+}
+
+/// The default strategy, but saying what failed. The middleware's own
+/// warning only gives the attempt number and the delay.
+struct LoggedStrategy;
+
+impl RetryableStrategy for LoggedStrategy {
+    fn handle(&self, result: &reqwest_middleware::Result<Response>) -> Option<Retryable> {
+        let retryable = DefaultRetryableStrategy.handle(result);
+
+        if retryable == Some(Retryable::Transient) {
+            match result {
+                Ok(response) => warn!("{} answered {}", response.url(), response.status()),
+                Err(error) => warn!("{error:#}"),
+            }
+        }
+
+        retryable
+    }
+}
+
 impl HomeAssistant {
     pub fn new(mut base: Url, token: &str, retry: bool) -> Result<Self> {
         if base.cannot_be_a_base() {
@@ -50,6 +88,7 @@ impl HomeAssistant {
         let mut client = ClientBuilder::new(
             reqwest::Client::builder()
                 .default_headers(headers)
+                .timeout(REQUEST_TIMEOUT)
                 .build()?,
         );
 
@@ -60,7 +99,10 @@ impl HomeAssistant {
                 .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
                 .build_with_total_retry_duration_and_limit_retries(Duration::from_secs(2 * 60));
 
-            client = client.with(RetryTransientMiddleware::new_with_policy(retry_policy));
+            client = client.with(RetryTransientMiddleware::new_with_policy_and_strategy(
+                retry_policy,
+                LoggedStrategy,
+            ));
         }
 
         Ok(Self {
@@ -105,14 +147,31 @@ impl HomeAssistant {
             .await?)
     }
 
+    /// The current frame of `entity`. HA has been seen answering `200` with a
+    /// body that is no image at all, so a decoding error names the entity and
+    /// what came back instead.
     pub async fn get_camera_image(&self, entity: &str) -> Result<RgbImage> {
-        let bytes = self
+        let response = self
             .request(Method::GET, &["api", "camera_proxy", entity])
-            .await?
-            .bytes()
             .await?;
 
-        Ok(image::load_from_memory(&bytes)?.into_rgb8())
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("no content type")
+            .to_owned();
+
+        let bytes = response.bytes().await?;
+
+        let image = image::load_from_memory(&bytes).with_context(|| {
+            format!(
+                "decoding the frame of {entity} ({} bytes, {content_type})",
+                bytes.len()
+            )
+        })?;
+
+        Ok(image.into_rgb8())
     }
 
     pub async fn send_event(&self, event: &str) -> Result<EventResult> {
@@ -255,12 +314,38 @@ mod tests {
             .mount(&server)
             .await;
 
-        assert!(
-            home_assistant(&server)
-                .get_camera_image("camera.front_door")
+        let error = home_assistant(&server)
+            .get_camera_image("camera.front_door")
+            .await
+            .unwrap_err();
+
+        // The entity and what HA sent instead are what tell a broken camera
+        // apart from an error page.
+        let message = format!("{error:#}");
+        assert!(message.contains("camera.front_door"), "{message}");
+        assert!(message.contains("10 bytes, image/jpeg"), "{message}");
+        assert!(!is_permanent(&error));
+    }
+
+    #[tokio::test]
+    async fn only_a_rejected_token_is_permanent() {
+        let server = MockServer::start().await;
+
+        for (status, permanent) in [(401, true), (403, true), (404, false), (500, false)] {
+            server.reset().await;
+
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+
+            let error = home_assistant(&server)
+                .get_entity::<(), String>("sun.sun")
                 .await
-                .is_err()
-        );
+                .unwrap_err();
+
+            assert_eq!(is_permanent(&error), permanent, "{status}: {error}");
+        }
     }
 
     #[tokio::test]
